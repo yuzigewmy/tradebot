@@ -154,6 +154,9 @@ async def settle_second(account, instrument, trade, mark, at, ticks):
     position = account.positions[instrument]
     if mark is not None:
         account.marks[instrument] = d(mark[4])
+    # OKX carries forward the previous price in seconds with no trades.
+    if trade is not None and trade[5] == 0:
+        trade = None
     trigger = exit_trigger(position, trade, mark)
     if trade and position.exit_at is not None and trade[0] >= position.exit_at and (trigger is None or trigger[0] != "liquidation"):
         trigger = "time_limit", d(trade[1]), False

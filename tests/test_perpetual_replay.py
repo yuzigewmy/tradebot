@@ -61,7 +61,7 @@ def test_shared_account_opens_after_past_trades_then_uses_first_ordered_tick():
         assert account.positions["SWAP"].contracts == 10
         assert account.cash == Decimal("95.95")
         account.fund("SWAP", 0.001, 101, 2000)
-        await process_second(account, {"SWAP": [2000, 100, 103.25, 98.8, 100]}, {}, [], 3000, ticks)
+        await process_second(account, {"SWAP": [2000, 100, 103.25, 98.8, 100, 1]}, {}, [], 3000, ticks)
         trade, = account.trades
         assert (trade["exit_reason"], trade["trigger_at"], trade["exit_evidence"]) == ("take_profit", 2100, "ordered_trades")
         assert account.equity() == Decimal("103.017390")
@@ -77,7 +77,7 @@ def test_isolated_liquidation_has_priority_when_second_cannot_be_ordered():
         async def not_used(*_):
             raise AssertionError("liquidation cannot be resolved from the trade feed")
 
-        await process_second(account, {"SWAP": [1000, 100, 100, 98, 98]}, {"SWAP": [1000, 100, 100, 96, 96]}, [], 2000, not_used)
+        await process_second(account, {"SWAP": [1000, 100, 100, 98, 98, 1]}, {"SWAP": [1000, 100, 100, 96, 96]}, [], 2000, not_used)
         trade, = account.trades
         assert trade["exit_reason"] == "liquidation" and trade["ambiguous_second"]
         assert account.equity() == Decimal("95.95")
@@ -93,11 +93,13 @@ def test_time_exit_uses_first_trade_at_deadline_before_a_later_target():
         assert account.enter("SWAP", signal["candidate"], signal["verified_quote"], 1000) == "entered"
 
         async def ticks(inst, ts):
-            assert (inst, ts) == ("SWAP", 2000)
-            return [[2100, 1, 101], [2400, 2, 103.1]]
+            assert (inst, ts) == ("SWAP", 3000)
+            return [[3100, 1, 101], [3400, 2, 103.1]]
 
-        await process_second(account, {"SWAP": [2000, 101, 103.1, 101, 103.1]}, {}, [], 3000, ticks)
+        await process_second(account, {"SWAP": [2000, 100.5, 100.5, 100.5, 100.5, 0]}, {}, [], 3000, ticks)
+        assert "SWAP" in account.positions
+        await process_second(account, {"SWAP": [3000, 101, 103.1, 101, 103.1, 1]}, {}, [], 4000, ticks)
         closed, = account.trades
-        assert (closed["exit_reason"], closed["trigger_at"], closed["exit_reference"]) == ("time_limit", 2100, 101)
+        assert (closed["exit_reason"], closed["trigger_at"], closed["exit_reference"]) == ("time_limit", 3100, 101)
 
     asyncio.run(scenario())
