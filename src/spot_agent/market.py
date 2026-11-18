@@ -11,7 +11,7 @@ import ccxt
 import numpy as np
 import pandas as pd
 
-from .contracts import TIMEFRAMES
+from .contracts import SPOT_TIMEFRAMES, TIMEFRAMES
 
 
 @dataclass
@@ -70,7 +70,8 @@ def fetch_market(exchange_id, symbol, count=600):
         raise ValueError("只支持现货市场")
     as_of = exchange.fetch_time() - 2000
     frames = {}
-    for timeframe, duration in TIMEFRAMES.items():
+    for timeframe in SPOT_TIMEFRAMES:
+        duration = TIMEFRAMES[timeframe]
         since = (as_of // duration - count) * duration
         rows = []
         limit = 300 if exchange_id == "okx" else 1000
@@ -107,7 +108,7 @@ def demo_market(symbol, as_of=None):
         "volume": rng.lognormal(4 if symbol == "BTC/USDT" else 6, 0.5, len(index)),
     }, index=pd.to_datetime(timestamps, unit="ms", utc=True))
     frames = {}
-    for timeframe in TIMEFRAMES:
+    for timeframe in SPOT_TIMEFRAMES:
         grouped = df.resample("1D" if timeframe == "1d" else timeframe).agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"})
         rows = [[int(ts.timestamp() * 1000), *values] for ts, values in zip(grouped.index, grouped.to_numpy().tolist())]
         frames[timeframe] = build_frame(rows[-601:], "synthetic", symbol, timeframe, "synthetic", as_of)

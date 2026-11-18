@@ -12,7 +12,7 @@
 
 星数是 GitHub 官方页面读数，随时间变化。表中是项目与设计参考，没有移植策略源码，也没有验证其收益。
 
-- 行情：OKX [成交 K 线](https://www.okx.com/docs-v5/en/#order-book-trading-market-data-ws-candlesticks-channel) 1m / 15m / 1H，连接时 REST 补历史。只在 `confirm=1` 时推进策略。105 秒前闭合的高周期 K 线可以使用，但晚于决策时点的 K 线不可以；在周期交界处等对应高周期收盘确认。断线补齐历史后从下一根开始，不补发旧信号。
+- 行情：OKX [成交 K 线](https://www.okx.com/docs-v5/en/#order-book-trading-market-data-ws-candlesticks-channel) 1m / 15m / 1H，连接时 REST 补历史。只在 `confirm=1` 时推进策略。高周期只使用决策时点应已收盘的最新连续窗口；在周期交界处等高周期收盘确认。断线补齐历史后从下一根开始，不补发旧信号。
 - 规则：1H 和 15m 定方向，1m 确认回踩恢复或波动收缩后的放量突破。精确阈值在 [policy.json](../skills/perpetual-entry/policy.json)，解释规则在 [SKILL.md](../skills/perpetual-entry/SKILL.md)。窗口和量比基准排除触发 K 线。
 - 报价：交易所成交用于形态与退出参考；盘口用于估算入场；标记价用于基差检查；资金费率按可能跨过一次结算的情景计入成本。无账户数据，不估算强平或杠杆仓位。
 - 研判：本地服务主动连接行情，每根 1m 收盘计算。默认“关键变化”触发模型，含首次评估、15m 收盘、方向或波动状态变化及规则候选；可以显式切换成每根 1m。模型收到策略 skill、参数和本次计算证据，同一合约只处理最新待分析事件。模型只能确认或等待。候选未通过复核、已到期或报价不再适用时不发布。

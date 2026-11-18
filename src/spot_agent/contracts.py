@@ -2,7 +2,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-TIMEFRAMES = {"1h": 3600000, "4h": 14400000, "1d": 86400000}
+TIMEFRAMES = {"1m": 60000, "15m": 900000, "1h": 3600000, "4h": 14400000, "1d": 86400000}
+SPOT_TIMEFRAMES = ("1h", "4h", "1d")
+PERPETUAL_TIMEFRAMES = ("1m", "15m", "1h")
 PROJECT_SCHEMA = "spot-analysis/v1"
 
 
