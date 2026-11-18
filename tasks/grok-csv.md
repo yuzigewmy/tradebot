@@ -8,9 +8,8 @@ Contract:
 - Exact required headers timestamp,open,high,low,close,volume, any order; reject duplicate headers and extra columns. Strip header/cell whitespace; accept UTF-8 BOM on the first header.
 - Max 12000 rows, max text length 2000000; at least 30 rows.
 - timestamp is an integer epoch in milliseconds, positive; reject decimal, exponent notation, ISO dates, nan, inf.
-- Price fields finite positive floats, volume finite >=0; low <= min(open,close) <= max(open,close) <= high.
-- Rows must be strictly increasing timestamp; reject duplicates. No silent sort or filling.
-- Reject malformed rows and missing/extra cell counts, nonfinite values and empty fields. Skip only entirely blank lines.
+- Parse numeric fields only. Domain validation (finite numbers, OHLC range, volume, time order/alignment) belongs to build_frame and must NOT be repeated here.
+- Reject malformed rows and missing/extra cell counts or empty numeric fields. Skip only entirely blank lines.
 - Return timestamp as int and other values as float in exact OHLCV column order.
 - Raise ValueError with a short Chinese error message including row number when relevant. Never include entire source text in errors.
 - No file/network IO, no imports besides csv, io, math, re.
