@@ -39,6 +39,7 @@ pydantic_core==2.50.4
 Pygments==2.21.0
 pytest==9.2.0
 python-dateutil==4.0.0
+python-dotenv==1.2.4
 requests==2.34.2
 starlette==1.10.0
 TA-Lib==0.8.3

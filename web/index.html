@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>现货研究台 · 趋势与持仓分析</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script defer src="/static/plotly.min.js"></script>
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <a href="/" class="brand"><span class="brand-mark" aria-hidden="true">≋</span><strong>现货研究台</strong><span class="brand-note">趋势 · 证据 · 持仓</span></a>
+    <span class="header-note">现货研究 / 无实盘下单</span>
+  </header>
+  <main>
+    <div class="page-heading"><div><h1>现货技术分析</h1><p>多周期 K 线与持仓情景</p></div><span id="provider-status" class="quiet">正在读取模型配置</span></div>
+    <form id="analysis-form" class="toolbar">
+      <label>数据来源<select id="source" name="source"><option value="live">交易所真实行情</option><option value="synthetic">合成演示数据</option></select></label>
+      <label>交易所<select id="exchange" name="exchange"><option value="okx">OKX</option><option value="binance">Binance</option></select></label>
+      <label>现货交易对<select id="symbol" name="symbol"><option value="BTC/USDT">BTC / USDT</option><option value="ETH/USDT">ETH / USDT</option></select></label>
+      <button id="analyze-button" class="primary" type="submit">生成分析 <span aria-hidden="true">↗</span></button>
+      <button id="export-button" class="secondary" type="button" disabled>导出报告 ↓</button>
+      <span class="toolbar-note">1D / 4H / 1H · 仅已收盘数据</span>
+    </form>
+    <div id="error" class="error" role="alert" hidden></div>
+    <div id="loading" class="loading" role="status" hidden><p id="loading-text">正在读取现货 K 线并计算技术证据…</p><div class="skeleton"></div><div class="skeleton short"></div></div>
+    <section id="results" hidden>
+      <div class="market-heading">
+        <div><div class="market-name"><h2 id="market-symbol"></h2><span id="source-badge" class="badge"></span><span class="quiet">现货</span></div><div class="quote"><strong id="price"></strong><span>USDT</span><span id="price-change"></span></div></div>
+        <div class="market-meta"><p id="market-time"></p><p id="market-source"></p><p id="snapshot-label" class="mono"></p></div>
+      </div>
+      <div id="quality-notes" class="notice" hidden></div>
+      <div class="research-layout">
+        <section class="chart-section" aria-label="K线图表">
+          <div class="section-toolbar"><div id="timeframe-tabs" class="tabs" role="tablist" aria-label="分析周期"></div><span id="chart-time" class="quiet"></span></div>
+          <div id="price-chart" class="price-chart"></div>
+          <div id="momentum-chart" class="momentum-chart"></div>
+          <p class="chart-caption">EMA20 / 50 / 200 · 成交量 · RSI14　|　图中价区来自所选周期已确认摆动点，时间统一为 UTC。</p>
+        </section>
+        <aside class="verdict-section">
+          <h2>市场判断</h2><p id="market-state" class="state-title"></p><p id="market-action"></p>
+          <div id="cycle-summary" class="cycle-summary"></div>
+          <div class="subsection"><h3>需要同时看到的反证</h3><ul id="counter-evidence"></ul></div>
+          <p class="method-note">证据强弱描述规则一致性，未经胜率校准。所有情景均需确认，当前版本未验证策略收益。</p>
+        </aside>
+      </div>
+      <section class="evidence-section">
+        <div class="section-heading"><h2>技术证据</h2><span id="evidence-timeframe" class="quiet"></span></div>
+        <div class="table-scroll"><table><thead><tr><th>维度</th><th>计算事实与解读</th><th>证据引用</th></tr></thead><tbody id="evidence-table"></tbody></table></div>
+      </section>
+      <section class="scenario-section"><div class="section-heading"><h2>接下来，观察什么</h2><span class="quiet">条件情景 · 无虚构概率</span></div><div id="scenarios"></div></section>
+      <section class="portfolio-section">
+        <div class="section-heading"><h2>持仓评估 <span id="portfolio-symbol"></span></h2><span class="quiet">本次资金 = 当前币种 + 所填现金</span></div>
+        <p class="section-description">填写后按当前快照计算新增上限和退出情景。以下默认风险比例仅作示例，请自行调整。</p>
+        <form id="portfolio-form" class="portfolio-form">
+          <label>持币数量<input name="quantity" type="number" min="0" step="any" value="0" required></label>
+          <label>可卖数量<input name="available_quantity" type="number" min="0" step="any" value="0" required></label>
+          <label>平均成本（可留空）<input name="average_cost" type="number" min="0.000001" step="any" placeholder="未知则不计算盈亏"></label>
+          <label>可用现金 / USDT<input name="cash" type="number" min="0" step="any" value="10000" required></label>
+          <label>退出参考价 / USDT<input id="exit-price" name="exit_price" type="number" min="0.000001" step="any" placeholder="填写你的失效退出价" required></label>
+          <label>风险预算 / %<input name="risk_percent" type="number" min="0.01" max="10" step="any" value="1" required></label>
+          <label>单币权重上限 / %<input name="max_weight_percent" type="number" min="0.01" max="100" step="any" value="30" required></label>
+          <label>单边手续费 / %<input name="fee_percent" type="number" min="0" max="2" step="any" value="0.1" required></label>
+          <label>单边滑点假设 / %<input name="slippage_percent" type="number" min="0" max="5" step="any" value="0.1" required></label>
+          <button id="portfolio-button" class="secondary" type="submit">用当前快照评估</button>
+        </form>
+        <div id="portfolio-result" class="portfolio-result" aria-live="polite"><p class="quiet">尚未填写持仓。成本未知时保持未知，资金计算不包含其他资产。</p></div>
+      </section>
+      <section class="insight-section">
+        <div class="section-heading"><h2>深度研判</h2><span class="quiet">可选模型解释 · 引用已有证据</span></div>
+        <form id="insight-form"><label for="question">向分析 Agent 追问</label><div class="question-row"><input id="question" maxlength="1200" value="当前多周期有哪些矛盾？哪些确认条件会改变判断？" required><button id="insight-button" class="secondary" type="submit">分析证据 ↗</button></div></form>
+        <p id="insight-status" class="quiet">模型未配置时，可完整使用上面的确定性分析。</p><div id="insight-result" aria-live="polite"></div>
+      </section>
+    </section>
+    <details class="import-section"><summary>导入自己的 OHLCV CSV</summary><p>字段：timestamp,open,high,low,close,volume；时间为 UTC 毫秒，严格升序，30–12000 行。仅分析所选周期，历史导入始终标记回放。</p><form id="import-form"><label>周期<select id="import-timeframe"><option value="1h">1H</option><option value="4h">4H</option><option value="1d">1D</option></select></label><label>CSV文件<input id="csv-file" type="file" accept=".csv,text/csv" required></label><button class="secondary" type="submit">导入并分析</button></form></details>
+    <footer>技术指标由 TA-Lib 与确定性规则计算。K 线不能证明资金意图，退出参考价不保证成交。<a href="/docs" target="_blank" rel="noopener">API 文档 ↗</a></footer>
+  </main>
+</body>
+</html>

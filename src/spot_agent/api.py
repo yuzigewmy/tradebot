@@ -1,0 +1,133 @@
+import csv
+import json
+import logging
+from pathlib import Path
+from typing import Annotated
+
+import ccxt
+from fastapi import FastAPI, Path as PathParameter, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
+import httpx
+import plotly
+from pydantic import ValidationError
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+from . import __version__
+from .agent import AgentError, model_configured, run_agent
+from .contracts import AnalyzeInput, ImportInput, InsightInput, PortfolioInput
+from .market import MarketFrame
+from .service import ROOT, analyze, assemble, import_analysis, load_report
+
+app = FastAPI(title="现货研究台 API", version=__version__)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
+SnapshotId = Annotated[str, PathParameter(pattern=r"^[a-f0-9]{24}$")]
+logger = logging.getLogger("spot_agent")
+
+
+@app.middleware("http")
+async def local_origin(request: Request, call_next):
+    origin = request.headers.get("origin")
+    if request.method == "POST" and origin and origin != str(request.base_url).rstrip("/"):
+        return JSONResponse({"error": {"code": "ORIGIN", "message": "仅接受本地页面同源请求"}}, status_code=403)
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    return response
+
+
+def error_response(code, message, status):
+    return JSONResponse({"error": {"code": code, "message": message}}, status_code=status)
+
+
+@app.exception_handler(RequestValidationError)
+async def input_error(request, error):
+    detail = error.errors()[0]
+    return error_response("INPUT", ".".join(map(str, detail["loc"])) + ": " + detail["msg"], 422)
+
+
+@app.exception_handler(ValueError)
+@app.exception_handler(csv.Error)
+async def data_error(request, error):
+    return error_response("DATA", str(error), 422)
+
+
+@app.exception_handler(FileNotFoundError)
+async def report_not_found(request, error):
+    return error_response("NOT_FOUND", "未找到该报告快照", 404)
+
+
+@app.exception_handler(ccxt.BaseError)
+async def market_error(request, error):
+    logger.warning("public market error: %s", type(error).__name__)
+    return error_response("MARKET", "交易所公共行情请求失败（" + type(error).__name__ + "）。请检查网络或所选交易所；未切换到演示数据。", 502)
+
+
+@app.exception_handler(AgentError)
+async def agent_error(request, error):
+    return error_response("AGENT", str(error), 409)
+
+
+@app.exception_handler(httpx.HTTPStatusError)
+async def model_http_error(request, error):
+    return error_response("MODEL_HTTP", f"模型接口返回HTTP {error.response.status_code}，请检查本机配置与额度。", 502)
+
+
+@app.exception_handler(httpx.RequestError)
+async def model_network_error(request, error):
+    return error_response("MODEL_NETWORK", "模型接口连接失败或超时，基础分析仍保留。", 502)
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok", "version": __version__, "model_configured": model_configured(), "trading_enabled": False}
+
+
+@app.post("/api/analyze")
+def analyze_market(body: AnalyzeInput):
+    return analyze(body)
+
+
+@app.post("/api/import")
+def import_csv(body: ImportInput):
+    return import_analysis(body)
+
+
+@app.get("/api/reports/{snapshot_id}")
+def read_report(snapshot_id: SnapshotId):
+    return load_report(snapshot_id)
+
+
+@app.post("/api/reports/{snapshot_id}/portfolio")
+def reprice_portfolio(snapshot_id: SnapshotId, body: PortfolioInput):
+    saved = load_report(snapshot_id)
+    return assemble({tf: MarketFrame(**frame) for tf, frame in saved["raw_frames"].items()}, body)
+
+
+@app.get("/api/reports/{snapshot_id}/markdown")
+def export_report(snapshot_id: SnapshotId):
+    report = load_report(snapshot_id)
+    return PlainTextResponse(report["report"], media_type="text/markdown; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="spot-report-{snapshot_id}.md"'})
+
+
+@app.post("/api/reports/{snapshot_id}/insight")
+def insight(snapshot_id: SnapshotId, body: InsightInput):
+    try:
+        result = run_agent(load_report(snapshot_id), body.question)
+    except (ValidationError, json.JSONDecodeError) as error:
+        raise AgentError("模型返回格式不符合研判契约，结果未采用。") from error
+    return result
+
+
+@app.get("/")
+def index():
+    return FileResponse(ROOT / "web" / "index.html")
+
+
+@app.get("/static/plotly.min.js")
+def plotly_script():
+    return FileResponse(Path(plotly.__file__).parent / "package_data" / "plotly.min.js", media_type="application/javascript")
+
+
+app.mount("/static", StaticFiles(directory=ROOT / "web"), name="web")
