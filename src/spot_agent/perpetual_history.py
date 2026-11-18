@@ -2,7 +2,7 @@
 
 import asyncio
 import csv
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import io
 import json
 from pathlib import Path
@@ -17,6 +17,7 @@ SECOND = 1000
 MINUTE = 60 * SECOND
 DAY = 1440 * MINUTE
 FUNDING_INTERVAL = 8 * 60 * MINUTE
+TRADE_ARCHIVE_TZ = timezone(timedelta(hours=8))
 PAGE = 300
 TRADE = "market/history-candles"
 MARK = "market/history-mark-price-candles"
@@ -166,8 +167,7 @@ class OkxHistory:
                 break
             raw = await self.get(endpoint, instId=instrument, type=1, after=raw[-1]["tradeId"], limit=100)
         if not rows:
-            day = start // DAY * DAY
-            date = datetime.fromtimestamp(day / SECOND, timezone.utc).date()
+            date = datetime.fromtimestamp(start / SECOND, TRADE_ARCHIVE_TZ).date()
             filename = f"{instrument}-trades-{date}.zip"
             url = f"https://static.okx.com/cdn/okex/traderecords/trades/daily/{date:%Y%m%d}/{filename}?v=1001"
             rows = await self.archived_ticks(filename, url, start, end)
