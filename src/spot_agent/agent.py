@@ -24,6 +24,24 @@ def model_configured():
     return all(os.environ.get(name) for name in ["SPOT_LLM_BASE_URL", "SPOT_LLM_API_KEY", "SPOT_LLM_MODEL"])
 
 
+def responses_config():
+    url = os.environ["SPOT_LLM_BASE_URL"].rstrip("/") + "/responses"
+    headers = {"Authorization": "Bearer " + os.environ["SPOT_LLM_API_KEY"]}
+    if actor := os.environ.get("SPOT_LLM_ACTOR_AUTHORIZATION"):
+        headers["x-openai-actor-authorization"] = actor
+    payload = {
+        "model": os.environ["SPOT_LLM_MODEL"], "store": False,
+        "reasoning": {"effort": os.environ.get("SPOT_LLM_REASONING_EFFORT", "high")},
+    }
+    if tier := os.environ.get("SPOT_LLM_SERVICE_TIER"):
+        payload["service_tier"] = tier
+    return url, headers, payload
+
+
+def response_text(output):
+    return "".join(part["text"] for item in output if item["type"] == "message" for part in item["content"] if part["type"] == "output_text")
+
+
 def validate_answer(content, evidence_ids):
     answer = InsightAnswer.model_validate_json(content)
     if not set(answer.evidence_ids) <= set(evidence_ids):
@@ -57,19 +75,12 @@ def run_agent(report, question):
     deadline = time.monotonic() + 90
     calls = 0
     evidence_read = set()
-    model = os.environ["SPOT_LLM_MODEL"]
-    headers = {"Authorization": "Bearer " + os.environ["SPOT_LLM_API_KEY"]}
-    if actor := os.environ.get("SPOT_LLM_ACTOR_AUTHORIZATION"):
-        headers["x-openai-actor-authorization"] = actor
-    payload = {
-        "model": model, "reasoning": {"effort": os.environ.get("SPOT_LLM_REASONING_EFFORT", "high")},
-        "store": False, "include": ["reasoning.encrypted_content"], "instructions": instructions,
+    url, headers, base = responses_config()
+    payload = base | {
+        "include": ["reasoning.encrypted_content"], "instructions": instructions,
         "tools": tools, "max_output_tokens": 4096,
         "text": {"format": {"type": "json_schema", "name": "spot_insight", "strict": True, "schema": InsightAnswer.model_json_schema()}},
     }
-    if tier := os.environ.get("SPOT_LLM_SERVICE_TIER"):
-        payload["service_tier"] = tier
-    url = os.environ["SPOT_LLM_BASE_URL"].rstrip("/") + "/responses"
     with httpx.Client() as client:
         for turn in range(4):
             remaining = deadline - time.monotonic()
@@ -86,7 +97,7 @@ def run_agent(report, question):
             if not tool_calls:
                 if not evidence_read:
                     raise AgentError("模型没有读取技术证据，结果未采用。")
-                content = "".join(part["text"] for item in output if item["type"] == "message" for part in item["content"] if part["type"] == "output_text")
+                content = response_text(output)
                 answer = validate_answer(content, evidence_read)
                 return answer | {"model": result["model"], "service_tier": result.get("service_tier"), "tool_calls": calls, "snapshot_id": report["snapshot_id"]}
             inputs.extend(output)

@@ -5,7 +5,7 @@ import pytest
 
 from spot_agent.contracts import TIMEFRAMES
 from spot_agent.perpetual_market import closed_windows, parse_candle
-from spot_agent.perpetual_strategy import detect_setup, priced_candidate
+from spot_agent.perpetual_strategy import candidate_issue, detect_setup, exits_touched, priced_candidate
 
 
 def rows(timeframe, end):
@@ -54,3 +54,13 @@ def test_breakout_uses_previous_range_and_volume_not_trigger():
     assert analysis["setup"]["strategy"] == "breakout"
     assert analysis["setup"]["volume_ratio"] == 2
     assert analysis["setup"]["prior_high"] < 100.60
+
+
+def test_candidate_revalidation_rejects_drift_and_touch():
+    t = 1794960000000
+    setup = {"side": "long", "strategy": "pullback", "close": 100, "atr": 1, "stop_anchor": 99}
+    quote = {"bid": 99.99, "ask": 100.01, "mark": 100, "last": 100, "funding_rate": 0, "funding_at": t + 3600000, "ticker_at": t, "mark_at": t}
+    plan, _ = priced_candidate(setup, quote, Decimal("0.01"), t, t)
+    assert candidate_issue(plan, setup, quote | {"ask": plan["entry"] + 2}, t) == "复核后盘口无法按候选价或更优价入场"
+    assert exits_touched(plan, [t, 100, plan["take_profit"], 100, 100, 10])
+    assert not exits_touched(plan, [t + 60000, 100, plan["take_profit"], 100, 100, 10])

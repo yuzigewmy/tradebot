@@ -24,7 +24,7 @@ def _indicators(rows):
     upper, center, lower = talib.BBANDS(close, timeperiod=20, nbdevup=2, nbdevdn=2, matype=0)
     baseline = volume[-21:-1].mean()
     return {
-        "close": float(close[-1]), "ema20": float(fast[-1]), "ema50": float(slow[-1]), "prev_ema20": float(fast[-2]),
+        "close": float(close[-1]), "ema_fast": float(fast[-1]), "ema_slow": float(slow[-1]), "prev_ema_fast": float(fast[-2]),
         "adx": float(talib.ADX(high, low, close, timeperiod=14)[-1]), "rsi": float(talib.RSI(close, timeperiod=14)[-1]),
         "atr": float(atr[-1]), "atr_reference": float(np.median(atr[-61:-1])),
         "volume_ratio": float(volume[-1] / baseline) if baseline > 0 else 0.0,
@@ -33,9 +33,9 @@ def _indicators(rows):
 
 
 def _bias(values):
-    if values["close"] > values["ema20"] > values["ema50"]:
+    if values["close"] > values["ema_fast"] > values["ema_slow"]:
         return "long"
-    if values["close"] < values["ema20"] < values["ema50"]:
+    if values["close"] < values["ema_fast"] < values["ema_slow"]:
         return "short"
     return "mixed"
 
@@ -44,7 +44,7 @@ def detect_setup(windows):
     indicators = {tf: _indicators(rows) for tf, rows in windows.items()}
     context = {tf: {
         "closed_at": windows[tf][-1][0] + TIMEFRAMES[tf], "bias": _bias(values),
-        **{key: values[key] for key in ("close", "ema20", "ema50", "adx", "rsi", "atr", "volume_ratio")},
+        **{key: values[key] for key in ("close", "ema_fast", "ema_slow", "adx", "rsi", "atr", "volume_ratio")},
     } for tf, values in indicators.items()}
     side = context["1h"]["bias"]
     if side != context["15m"]["bias"]:
@@ -59,21 +59,29 @@ def detect_setup(windows):
     prior_high, prior_low = max(row[2] for row in lookback), min(row[3] for row in lookback)
     close, atr, ratio = (micro[key] for key in ("close", "atr", "volume_ratio"))
     expansion = POLICY["breakout_atr_buffer"] * atr
-    trigger = close > prior_high + expansion if side == "long" else close < prior_low - expansion
     prev = bars[-2]
-    reclaimed = (prev[3] <= micro["prev_ema20"] and prev[4] <= micro["prev_ema20"] and close > micro["ema20"]) if side == "long" else (prev[2] >= micro["prev_ema20"] and prev[4] >= micro["prev_ema20"] and close < micro["ema20"])
+    fast, prev_fast = micro["ema_fast"], micro["prev_ema_fast"]
+    trigger, reclaimed = False, False
+    if side == "long":
+        trigger, reclaimed = close > prior_high + expansion, prev[4] <= prev_fast and close > fast
+    elif side == "short":
+        trigger, reclaimed = close < prior_low - expansion, prev[4] >= prev_fast and close < fast
+    pullback_adx_pass = context["15m"]["adx"] >= POLICY["pullback_adx_min"]
+    pullback_volume_pass = ratio >= POLICY["pullback_volume_min"]
+    breakout_volume_pass = ratio >= POLICY["breakout_volume_min"]
     setup = {
         "side": side, "strategy": None, "close": close, "atr": atr, "volume_ratio": ratio,
         "squeezed": squeezed, "volatile": volatile, "prior_band_width": prev_band, "squeeze_threshold": width_threshold,
-        "prior_high": prior_high, "prior_low": prior_low, "range_cross": trigger if side != "mixed" else False,
-        "ema_reclaimed": reclaimed if side != "mixed" else False,
+        "prior_high": prior_high, "prior_low": prior_low, "range_cross": trigger, "ema_reclaimed": reclaimed,
+        "pullback_adx_15m_pass": pullback_adx_pass, "pullback_volume_1m_pass": pullback_volume_pass,
+        "breakout_volume_1m_pass": breakout_volume_pass,
     }
     if side == "mixed" or atr <= 0:
         return {"context": context, "setup": setup}
     recent = bars[-POLICY["pullback_stop_window"]:]
-    if squeezed and trigger and ratio >= POLICY["breakout_volume_min"]:
+    if squeezed and trigger and breakout_volume_pass:
         setup.update(strategy="breakout", stop_anchor=prior_high if side == "long" else prior_low)
-    elif reclaimed and context["15m"]["adx"] >= POLICY["pullback_adx_min"] and ratio >= POLICY["pullback_volume_min"]:
+    elif reclaimed and pullback_adx_pass and pullback_volume_pass:
         anchor = min(row[3] for row in recent) if side == "long" else max(row[2] for row in recent)
         setup.update(strategy="pullback", stop_anchor=anchor)
     return {"context": context, "setup": setup}
@@ -154,3 +162,10 @@ def candidate_issue(candidate, setup, quote, now):
     if funding_cost_rate(long, quote, now) > candidate["funding_cost_rate"]:
         return "复核后预计承担的资金费上升"
     return None
+
+
+def exits_touched(candidate, candle):
+    if candle is None or candle[0] != candidate["closed_at"]:
+        return False
+    lower, upper = sorted((candidate["stop_loss"], candidate["take_profit"]))
+    return candle[3] <= lower or candle[2] >= upper

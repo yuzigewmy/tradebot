@@ -1,4 +1,5 @@
 import csv
+from contextlib import asynccontextmanager
 import json
 import logging
 from pathlib import Path
@@ -18,10 +19,20 @@ from . import __version__
 from .agent import AgentError, model_configured, run_agent
 from .contracts import AnalyzeInput, ImportInput, InsightInput, PortfolioInput
 from .market import MarketFrame
+from .perpetual_api import INSTRUMENTS, router as perpetual_router
+from .perpetual_monitor import live_monitors
 from .service import ROOT, analyze, assemble, import_analysis, load_report
 
-app = FastAPI(title="现货研究台 API", version=__version__)
+@asynccontextmanager
+async def lifespan(app):
+    async with live_monitors(ROOT / "data" / "perpetual-signals.jsonl", INSTRUMENTS) as monitors:
+        app.state.perpetual = monitors
+        yield
+
+
+app = FastAPI(title="加密研究台 API", version=__version__, lifespan=lifespan)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
+app.include_router(perpetual_router)
 SnapshotId = Annotated[str, PathParameter(pattern=r"^[a-f0-9]{24}$")]
 logger = logging.getLogger("spot_agent")
 
@@ -123,6 +134,11 @@ def insight(snapshot_id: SnapshotId, body: InsightInput):
 @app.get("/")
 def index():
     return FileResponse(ROOT / "web" / "index.html")
+
+
+@app.get("/perpetual", include_in_schema=False)
+def perpetual_page():
+    return FileResponse(ROOT / "web" / "perpetual.html")
 
 
 @app.get("/static/plotly.min.js")

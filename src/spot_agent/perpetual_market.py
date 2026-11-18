@@ -57,13 +57,19 @@ async def instrument_tick(client, instrument):
     contract, = await public_data(client, "public/instruments", instType="SWAP", instId=instrument)
     if (contract["ctType"], contract["settleCcy"], contract["state"]) != ("linear", "USDT", "live"):
         raise MarketError("仅支持交易中的线性 USDT 永续")
-    return Decimal(contract["tickSz"])
+    tick = Decimal(contract["tickSz"])
+    if not tick.is_finite() or tick <= 0:
+        raise MarketError("OKX 合约报价精度无效")
+    return tick
 
 
 async def history(client, instrument, timeframe):
     raw = await public_data(client, "market/candles", instId=instrument, bar=BARS[timeframe], limit=HISTORY_LIMIT)
     parsed = [parse_candle(candle) for candle in reversed(raw)]
-    return [row for row, confirmed in parsed if confirmed], next((row for row, confirmed in reversed(parsed) if not confirmed), None)
+    closed = [row for row, confirmed in parsed if confirmed]
+    if len(closed) < WINDOW:
+        raise MarketError(f"OKX {timeframe} 历史不足 {WINDOW} 根")
+    return closed, next((row for row, confirmed in reversed(parsed) if not confirmed), None)
 
 
 async def quote(client, instrument):
@@ -72,8 +78,12 @@ async def quote(client, instrument):
         public_data(client, "public/mark-price", instType="SWAP", instId=instrument),
         public_data(client, "public/funding-rate", instId=instrument),
     )
-    return {
+    values = {
         "bid": float(ticker["bidPx"]), "ask": float(ticker["askPx"]), "last": float(ticker["last"]), "ticker_at": int(ticker["ts"]),
         "mark": float(mark["markPx"]), "mark_at": int(mark["ts"]),
         "funding_rate": float(funding["fundingRate"]), "funding_at": int(funding["fundingTime"]),
     }
+    prices = [values[key] for key in ("bid", "ask", "last", "mark")]
+    if not all(price > 0 and isfinite(price) for price in prices) or not isfinite(values["funding_rate"]):
+        raise MarketError("OKX 盘口、标记价或资金费率无效")
+    return values

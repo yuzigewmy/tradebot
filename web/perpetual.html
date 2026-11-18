@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>永续合约 · 开仓研判</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/perpetual.css">
+  <script defer src="/static/plotly.min.js"></script>
+  <script defer src="/static/perpetual.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <a href="/" class="brand"><span class="brand-mark" aria-hidden="true">≋</span><strong>加密研究台</strong></a>
+    <nav class="workspace-nav" aria-label="市场"><a href="/">现货</a><a href="/perpetual" aria-current="page">永续合约</a></nav>
+  </header>
+  <main class="perpetual-main">
+    <div class="page-heading"><div><h1>永续开仓研判</h1><p>OKX · USDT 线性永续</p></div><span id="monitor-status" class="status-tag" role="status">读取监控状态</span></div>
+    <form id="monitor-form" class="toolbar">
+      <label>合约<select id="instrument"><option value="BTC-USDT-SWAP">BTC / USDT</option><option value="ETH-USDT-SWAP">ETH / USDT</option></select></label>
+      <label>模型研判频率<select id="review-mode"><option value="changes">关键变化</option><option value="minute">每分钟收盘</option></select></label>
+      <button class="primary" id="start-monitor" type="submit" disabled>启动监控</button>
+      <button class="secondary" id="stop-monitor" type="button" disabled>停止监控</button>
+      <span id="model-config" class="toolbar-note"></span>
+    </form>
+    <p id="monitor-error" class="error" role="alert" hidden></p>
+
+    <section id="signal-strip" class="signal-strip" aria-label="最新开仓信号" hidden>
+      <div><p id="signal-status" class="quiet"></p><h2 id="signal-title"></h2><p id="signal-clock" class="quiet"></p></div>
+      <dl id="signal-levels" class="signal-levels"></dl>
+    </section>
+
+    <div class="research-layout perpetual-layout">
+      <section class="chart-section" aria-label="永续成交 K 线">
+        <div class="section-toolbar swap-chart-toolbar">
+          <div class="tabs" aria-label="K 线周期">
+            <button type="button" aria-selected="true" data-period="1m">1m</button>
+            <button type="button" aria-selected="false" data-period="15m">15m</button>
+            <button type="button" aria-selected="false" data-period="1h">1H</button>
+          </div>
+          <span id="chart-time" class="quiet"></span>
+        </div>
+        <div id="swap-chart" class="price-chart" hidden></div>
+        <div id="chart-empty" class="empty-state"><p>等待行情</p><span class="quiet">监控未启动</span></div>
+        <p class="chart-caption">成交 K 线 · 灰色为形成中 · 图表时间 UTC</p>
+      </section>
+      <aside class="verdict-section" aria-label="策略与模型状态">
+        <h2>收盘分析</h2><p id="setup-title" class="state-title">暂无收盘评估</p>
+        <p id="market-note" class="quiet"></p>
+        <div id="swap-context" class="cycle-summary"></div>
+        <dl id="setup-info" class="quote-info" hidden></dl>
+        <dl id="quote-info" class="quote-info" hidden></dl>
+        <div class="subsection review-section">
+          <h3>模型复核</h3><p id="review-meta" class="quiet">等待策略变化</p>
+          <p id="review-summary"></p><p id="review-counter"></p><p id="review-evidence" class="quiet mono"></p>
+        </div>
+      </aside>
+    </div>
+
+    <section class="evidence-section">
+      <div class="section-heading"><h2>信号记录</h2><span id="policy-label" class="quiet mono"></span></div>
+      <p id="signals-empty" class="quiet">暂无通过模型和报价复核的信号。</p>
+      <div class="table-scroll" id="history-table" hidden><table class="signal-history"><thead><tr><th>触发收盘 / 北京时间</th><th>策略</th><th>开仓参考</th><th>止盈</th><th>止损</th><th>净收益风险比</th></tr></thead><tbody id="signal-rows"></tbody></table></div>
+    </section>
+    <footer>研究信号 · 无下单权限 · 费用与资金费为估算<a href="/docs">API 文档 ↗</a></footer>
+  </main>
+</body>
+</html>
