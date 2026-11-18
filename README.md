@@ -28,6 +28,8 @@ python -m venv .venv
 - 只有模型确认且再次检查盘口通过，才发布开仓、止盈和止损。信号最迟在下一根一分钟 K 线收盘时到期；若期间已经触及退出价，也不再显示为可用。记录写入 `data/perpetual-signals.jsonl`；停用监控后可查看历史。没有下单接口，也不估算杠杆或强平价。
 - 阈值和费用假设见 [policy.json](skills/perpetual-entry/policy.json)，修改后需要重启服务。调研来源、策略边界和验收记录见[永续方案](docs/perpetual-plan.md)。
 
+历史回测与实时模拟使用同一逐仓账户，默认 BTC/ETH 共用 100 USDT、25×、单笔计划止损风险为账户权益的 1%。回测读取 OKX 公开成交、盘口、标记价和已结算资金费率，并实际调用策略 Skill。运行命令、执行明细和数据边界见[永续回测与实时模拟](docs/perpetual-backtest.md)。
+
 ## 现货分析与模型配置
 
 - 真实行情从所选交易所获取；无网络时可显式选择合成演示。CSV 历史回放只分析实际导入的周期。三类来源分别标记。
@@ -36,4 +38,4 @@ python -m venv .venv
 - 本机配置使用 `gpt-6.2-sol` / `high`。该网关实测接受 `ultrafast` 并返回同名档位，`priority` 和 `fast` 探测则返回 `default`。应用显示网关实际返回的档位，不根据单次测试承诺提速。
 - 深度研判会将用户问题和所调用的证据发送到配置的模型服务。只有调用持仓工具时才发送持仓情景。请求设置 `store: false`，第三方网关自身的数据保留以其规则为准。密钥仅供服务器使用，不会放入网页、报告或 Git。
 
-现货快照保存在 `data/reports/`，可导出 Markdown。参考[现货实施方案](docs/implementation-plan.md)和[调研记录](docs/research.md)。现货与永续均未验证策略盈利能力。回测、连续模拟和多币组合账本为后续阶段。
+现货快照保存在 `data/reports/`，可导出 Markdown。参考[现货实施方案](docs/implementation-plan.md)和[调研记录](docs/research.md)。历史模拟收益只描述指定样本和撮合假设。
