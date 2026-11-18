@@ -35,6 +35,12 @@ def build_strategy(analyses):
         counter.append("均线是滞后指标；新近已确认低点失守将削弱当前上升判断。")
     scenarios = [
         {
+            "name": "上升趋势：回踩观察", "status": "需多周期上升并完成回踩确认",
+            "trigger": "多周期上升排列，参考周期回踩均线或已确认支撑，低点结构保持；执行周期重新收回短均线后再评估。",
+            "invalidation": "参考周期已确认更高低点失守，或多周期上升排列被破坏。",
+            "reference_zone": support, "evidence_ids": [f"{reference['timeframe']}:trend", f"{reference['timeframe']}:structure"],
+        },
+        {
             "name": "上行：突破后回踩", "status": "等待条件确认",
             "trigger": "参考周期收盘突破阻力价区，量比至少1.2；之后回踩守住，再由1H收盘确认。",
             "invalidation": "突破后收回阻力价区下方，或已确认回踩低点失守。",

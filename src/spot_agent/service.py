@@ -2,6 +2,7 @@ from dataclasses import asdict
 import hashlib
 import json
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 import time
 
 from . import __version__
@@ -49,9 +50,9 @@ def assemble(frames, position):
     snapshot["report"] = markdown(snapshot)
     REPORTS.mkdir(parents=True, exist_ok=True)
     target = REPORTS / f"{snapshot['snapshot_id']}.json"
-    temporary = target.with_suffix(".tmp")
-    temporary.write_text(json.dumps(snapshot, ensure_ascii=False, allow_nan=False), encoding="utf-8")
-    temporary.replace(target)
+    with NamedTemporaryFile(mode="w", encoding="utf-8", dir=REPORTS, suffix=".tmp", delete=False) as temporary:
+        json.dump(snapshot, temporary, ensure_ascii=False, allow_nan=False)
+    Path(temporary.name).replace(target)
     return snapshot
 
 

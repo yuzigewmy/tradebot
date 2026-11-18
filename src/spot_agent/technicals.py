@@ -114,9 +114,10 @@ def analyze_frame(frame):
     def add(category, title, text, values):
         evidence.append({"id": f"{frame.timeframe}:{category}", "timeframe": frame.timeframe, "at": at, "category": category, "title": title, "text": text, "values": values})
 
-    add("trend", "趋势与强度", f"{trend_label}；ADX14={fmt(indicators['adx14'])}。ADX只衡量强度；均线与MACD相关，不能重复计为独立证据。", {k: indicators[k] for k in ["ema20", "ema50", "ema200", "adx14", "plus_di", "minus_di"]})
-    add("structure", "价格结构与关键价区", f"已确认结构 {structure}。摆动点在右侧两根收盘后才可用；支撑阻力是历史价区，并不保证反转。", {"structure": structure, **zones})
-    add("momentum", "动量与冲突", f"RSI14={fmt(indicators['rsi14'])}，{momentum}。MACD柱={fmt(indicators['macd_histogram'], 4)}。", {k: indicators[k] for k in ["rsi14", "macd", "macd_signal", "macd_histogram"]})
+    add("trend", "趋势与强度", f"{trend_label}；EMA20/50/200={fmt(indicators['ema20'])}/{fmt(indicators['ema50'])}/{fmt(indicators['ema200'])}；ADX14={fmt(indicators['adx14'])}。ADX只衡量强度；均线与MACD相关，不能重复计为独立证据。", {k: indicators[k] for k in ["ema20", "ema50", "ema200", "adx14", "plus_di", "minus_di"]})
+    zone_text = "；".join(name + ("未识别" if zone is None else f"{zone['low']:,.2f}–{zone['high']:,.2f}") for name, zone in [("支撑", zones["support"]), ("阻力", zones["resistance"])])
+    add("structure", "价格结构与关键价区", f"已确认结构 {structure}；{zone_text}。摆动点在右侧两根收盘后才可用；价区并不保证反转。", {"structure": structure, **zones})
+    add("momentum", "动量与冲突", f"RSI14={fmt(indicators['rsi14'])}，{momentum}。MACD/信号/柱={fmt(indicators['macd'], 4)}/{fmt(indicators['macd_signal'], 4)}/{fmt(indicators['macd_histogram'], 4)}。", {k: indicators[k] for k in ["rsi14", "macd", "macd_signal", "macd_histogram"]})
     add("volatility", "波动与风险距离", f"ATR14={fmt(indicators['atr14'])}，占价格 {fmt(indicators['atr_percent'])}%；布林带宽 {fmt(indicators['bb_width_percent'])}%。ATR描述历史波动，不保证未来风险上限。", {k: indicators[k] for k in ["atr14", "atr_percent", "bb_upper", "bb_middle", "bb_lower", "bb_width_percent"]})
     add("volume", "量价配合", f"本根相对前20根均量 {fmt(indicators['volume_ratio'])} 倍；OBV近5根变化 {fmt(indicators['obv_change5'])}。这些是成交量统计，不代表主力净流入。", {k: indicators[k] for k in ["volume_ratio", "obv", "obv_change5"]})
     add("pattern", "K线形态", "、".join(patterns) + "；需结合价区和下一根确认。" if patterns else "最新已收盘K线未出现本版检测的吞没、锤头、十字形态。", {"patterns": patterns})

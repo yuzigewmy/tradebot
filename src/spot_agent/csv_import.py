@@ -6,7 +6,7 @@ from io import StringIO
 
 def parse_csv(text):
     reader = csv.reader(StringIO(text.lstrip("\ufeff")), strict=True)
-    headers = [v.strip() for v in next(reader)]
+    headers = [v.strip() for v in next(reader, [])]
     columns = ["timestamp", "open", "high", "low", "close", "volume"]
     if len(headers) != 6 or set(headers) != set(columns):
         raise ValueError("CSV表头必须恰好包含 timestamp,open,high,low,close,volume")

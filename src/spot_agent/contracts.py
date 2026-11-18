@@ -33,7 +33,7 @@ class AnalyzeInput(BaseModel):
 
 
 class ImportInput(BaseModel):
-    csv: str = Field(max_length=2000000)
+    csv: str = Field(min_length=1, max_length=2000000)
     exchange: str = Field(default="csv", pattern=r"^[a-zA-Z0-9_-]{1,20}$")
     symbol: Literal["BTC/USDT", "ETH/USDT"] = "BTC/USDT"
     timeframe: Literal["1h", "4h", "1d"] = "1h"
