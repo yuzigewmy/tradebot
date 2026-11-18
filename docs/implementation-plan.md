@@ -15,9 +15,9 @@
 - 市场：无杠杆现货；交易所先支持 OKX、Binance，分别获取各自数据，不静默跨所拼接。报价币先限制 USDT。
 - 币种：BTC/USDT、ETH/USDT 起步，后端验证市场确实是现货且可用。
 - 周期：1D、4H、1H；最长指标 EMA200，历史长度以稳定性和可用数据确定，默认请求 600 根。
-- 界面：本地中文研究台，默认 `127.0.0.1:8765`，公共实时行情与合成演示有醒目标记，显示 UTC/北京时间和最后收盘时点。
+- 界面：本地中文研究台，默认 `127.0.0.1:8765`，公共实时行情与合成演示有醒目标记，显示 UTC 截止时间和最后收盘时点。
 - 持仓：当前分析币种数量、可用数量、可选平均成本、可用 USDT、风险预算、单币权重上限、退出参考价。所有比例由用户在界面确认，默认值标为示例配置。
-- 模型：基础报告由确定性规则完成；可显式触发 Grok CLI 或 OpenAI-compatible API 的深度研判，失败显示原因，不把基础报告冒充模型输出。应用侧模型无文件、命令或交易工具。
+- 模型：基础报告由确定性规则完成；深度研判使用用户指定的 Responses API，`gpt-6.2-sol`、`high`，本机网关实测返回 `ultrafast`。应用侧模型只有快照证据工具。Grok CLI 仅用于开发协作。
 
 ## 三、模块架构
 
@@ -59,6 +59,7 @@
 | `POST /api/import` | 有界 CSV 文本、周期、交易所/交易对标签 | 校验后只分析导入周期，不伪造缺失周期；历史数据标记导入回放 |
 | `GET /api/reports/{id}` | 严格格式ID | 已归档结果；不能传任意路径 |
 | `GET /api/reports/{id}/markdown` | 同上 | UTF-8 Markdown 下载 |
+| `POST /api/reports/{id}/portfolio` | 手工持仓与风险参数 | 使用当前快照重算持仓情景，不刷新行情 |
 | `POST /api/reports/{id}/insight` | 问题与已保存ID | 经结构校验的模型研判，包含证据ID和明确的模型状态 |
 
 错误统一 `error.code/message`；限制请求大小、币种、周期、历史根数、问题长度、外部调用超时。部署仅绑定 loopback，限制 Host/Origin，网页没有第三方 CDN 依赖。
@@ -132,9 +133,10 @@ PowerShell：
 ```powershell
 Set-Location D:\crypto-spot-agent
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m pip install -r requirements.lock.txt
+.\.venv\Scripts\python.exe -m pip install -e . --no-deps
 .\.venv\Scripts\python.exe -m pytest -q
-.\.venv\Scripts\python.exe -m uvicorn spot_agent.api:app --host 127.0.0.1 --port 8765
+.\start.ps1
 ```
 
 版本通过 requirements.lock.txt 锁定。正式入口与依赖安装完成后再次核对命令可执行性。
