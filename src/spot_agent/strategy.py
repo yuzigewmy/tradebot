@@ -57,7 +57,10 @@ def build_strategy(analyses):
         counter.append("缺少完整支撑或阻力，相关情景只保留观察条件，不能据此计算完整区间收益风险比。")
     risk_reward = None
     if support is not None and resistance is not None:
-        risk_reward = (resistance["low"] - price) / (price - support["low"])
+        if support["low"] < price < resistance["low"]:
+            risk_reward = (resistance["low"] - price) / (price - support["low"])
+        else:
+            counter.append("当前价格已越过参考周期原价区，原区间收益风险比不适用。")
     return {
         "state": state, "evidence_strength": strength,
         "eligible_to_plan_addition": ready and all_up,

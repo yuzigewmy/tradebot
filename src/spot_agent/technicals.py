@@ -86,7 +86,9 @@ def analyze_frame(frame):
     lows = [s for s in swings if s["kind"] == "low"]
     structure = "不足两个已确认高低点"
     if len(highs) >= 2 and len(lows) >= 2:
-        structure = ("HH" if highs[-1]["price"] > highs[-2]["price"] else "LH") + "/" + ("HL" if lows[-1]["price"] > lows[-2]["price"] else "LL")
+        high_structure = "HH" if highs[-1]["price"] > highs[-2]["price"] else "LH" if highs[-1]["price"] < highs[-2]["price"] else "EH"
+        low_structure = "HL" if lows[-1]["price"] > lows[-2]["price"] else "LL" if lows[-1]["price"] < lows[-2]["price"] else "EL"
+        structure = high_structure + "/" + low_structure
     zones = price_zones(swings, price, indicators["atr14"])
     direction = "unknown"
     if indicators["ema200"] is not None:

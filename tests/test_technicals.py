@@ -36,3 +36,10 @@ def test_gap_uses_only_contiguous_tail_and_disables_warmup():
     result = analyze_frame(frame)
     assert result["indicators"]["ema200"] is None
     assert result["ready"] is False
+
+
+def test_equal_confirmed_highs_and_lows_are_not_lower_structure():
+    prices = [100, 101, 105, 101, 100, 95, 100, 101, 105, 101, 100, 95, 100, 101]
+    rows = [[i * 3600000, c, c + 0.1, c - 0.1, c, 10] for i, c in enumerate(prices)]
+    frame = build_frame(rows, "test", "BTC/USDT", "1h", "synthetic", len(rows) * 3600000)
+    assert analyze_frame(frame)["structure"] == "EH/EL"

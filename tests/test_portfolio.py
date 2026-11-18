@@ -24,6 +24,13 @@ def test_addition_satisfies_post_fee_weight_and_cash():
     assert x * 100 / post_equity <= 0.05 + 1e-10
 
 
+def test_trim_reaches_weight_after_sale_costs():
+    result = assess_portfolio(inputs(quantity=10, available_quantity=10, cash=0, max_weight_percent=50, fee_percent=2, slippage_percent=5), 100, True)
+    sold = result["trim_to_weight_quantity"]
+    equity_after = 1000 - sold * (100 - 100 * 0.98 * 0.95)
+    assert (10 - sold) * 100 / equity_after <= 0.5 + 1e-10
+
+
 @pytest.mark.parametrize("changes,eligible", [({"exit_price": 110}, True), ({}, False), ({"available_quantity": 0.5}, True), ({"risk_percent": 0.1}, True)])
 def test_invalid_exit_unready_locked_or_exhausted_risk_blocks_additions(changes, eligible):
     result = assess_portfolio(inputs(**changes), 100, eligible)

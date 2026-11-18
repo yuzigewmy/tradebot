@@ -30,6 +30,8 @@ def assess_portfolio(position, price, eligible):
     if weight_cap == 0:
         reasons.append("已达到单币权重上限。")
     additional = 0 if reasons else min(risk_cap, cash_cap, weight_cap)
+    sale_cost = price - price * (1 - slippage) * (1 - fee)
+    trim = max(0, (quantity * price - weight_limit * equity) / (price - weight_limit * sale_cost))
     return {
         "scope": "仅包含所填现金和当前币种，未包含其他资产",
         "price": price, "equity": equity, "quantity": quantity,
@@ -42,7 +44,7 @@ def assess_portfolio(position, price, eligible):
         "existing_risk": existing_risk, "remaining_risk_budget": remaining,
         "risk_per_new_coin": risk_per_coin, "buy_cost_per_coin": buy_cost,
         "additional_quantity": additional, "max_sell_quantity": position.available_quantity,
-        "trim_to_weight_quantity": min(position.available_quantity, max(0, quantity - weight_limit * equity / price)),
+        "trim_to_weight_quantity": min(position.available_quantity, trim),
         "reasons": reasons,
         "note": "数量为含费用/滑点假设的情景上限，未按交易所精度和最小金额处理；退出价不保证成交。",
     }
