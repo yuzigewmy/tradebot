@@ -12,7 +12,6 @@ import subprocess
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 import segno
@@ -88,7 +87,7 @@ class WechatBridge:
         self.signals = asyncio.Queue(maxsize=8)
         self.control = asyncio.Lock()
         self.last_poll = self.last_owner_message = None
-        self.conversation = deque(maxlen=3)
+        self.conversation = deque(maxlen=8)
 
     def start(self):
         if self.binding is not None and not self.binding.expired:
@@ -149,6 +148,8 @@ class WechatBridge:
                         await self.stop_connection()
                         self.store.save(state)
                         self.binding = state
+                        self.conversation.clear()
+                        self.last_owner_message = self.last_poll = self.delivery = None
                         self.pairing, self.pair_note = "confirmed", "已绑定，请在微信里给机器人发一条私聊"
                         self.start()
                         return

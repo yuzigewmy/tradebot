@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>微信机器人 · 加密研究台</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/wechat.css">
+  <script defer src="/static/wechat.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <a href="/" class="brand"><span class="brand-mark" aria-hidden="true">≋</span><strong>加密研究台</strong></a>
+    <nav class="workspace-nav" aria-label="研究台"><a href="/">现货</a><a href="/perpetual">永续合约</a><a href="/wechat" aria-current="page">微信</a></nav>
+  </header>
+  <main class="wechat-main">
+    <div class="page-heading">
+      <div><h1>微信机器人</h1><p>随时对话、研究加密行情、接收永续开仓提醒。</p></div>
+      <span class="wechat-status" id="connection" role="status">读取连接状态</span>
+    </div>
+    <section class="wechat-card" aria-label="微信绑定">
+      <h2>连接个人微信</h2>
+      <p id="binding-note" aria-live="polite">扫码授权后，在微信里给机器人发一条私聊。</p>
+      <img id="qr" alt="用微信扫一扫绑定研究台" width="228" height="228" hidden>
+      <form id="verify-form" hidden>
+        <label for="verification">微信验证码</label>
+        <div class="wechat-actions"><input id="verification" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{4,8}" maxlength="8" required><button class="primary">确认验证码</button></div>
+      </form>
+      <div class="wechat-actions">
+        <button class="primary" id="bind" type="button" disabled>生成微信二维码</button>
+        <button class="secondary" id="unlink" type="button" hidden>解除本机绑定</button>
+      </div>
+      <p id="wechat-error" class="error" role="alert" hidden></p>
+    </section>
+    <section class="wechat-card" aria-label="私聊与信号">
+      <h2>对话和提醒</h2>
+      <div class="wechat-examples"><code>介绍一下你自己</code><code>对比 BTC 和 ETH 永续走势</code><code>最近有开仓信号吗？</code></div>
+      <p>机器人从第一次私聊取得投递凭据。启用<a href="/perpetual">永续监控</a>后，新发布的有效开仓信号会发到这条私聊。</p>
+      <p id="delivery-note" class="quiet">暂无推送记录</p>
+    </section>
+  </main>
+</body>
+</html>

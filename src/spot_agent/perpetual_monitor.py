@@ -21,8 +21,9 @@ logger = logging.getLogger(__name__)
 
 
 class SignalJournal:
-    def __init__(self, path):
+    def __init__(self, path, on_signal=None):
         self.path = path
+        self.on_signal = on_signal
         self.records = deque(maxlen=120)
         if path.exists():
             with path.open(encoding="utf-8") as entries:
@@ -33,6 +34,8 @@ class SignalJournal:
         with self.path.open("a", encoding="utf-8") as target:
             target.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
         self.records.append(record)
+        if self.on_signal is not None:
+            self.on_signal(record)
 
     def for_instrument(self, instrument):
         return [record for record in reversed(self.records) if record["instrument"] == instrument]
@@ -256,13 +259,15 @@ class PerpetualMonitor:
             self.paper.enqueue(signal)
         self.review_state.update(status="signal", note="候选通过模型与报价复核")
 
+    def signal_is_active(self, signal, now):
+        return (self.status == "online" and self.skip_through < signal["closed_at"] and now < signal["expires_at"]
+                and not exits_touched(signal, self.forming["1m"]))
+
     def view(self):
         signals = self.journal.for_instrument(self.instrument)[:20]
         now, active_id = now_ms(), None
-        if signals and self.status == "online":
-            latest = signals[0]
-            if latest["closed_at"] > self.skip_through and now < latest["expires_at"] and not exits_touched(latest, self.forming["1m"]):
-                active_id = latest["id"]
+        if signals and self.signal_is_active(signals[0], now):
+            active_id = signals[0]["id"]
         return {
             "instrument": self.instrument, "mode": self.mode, "running": self.running,
             "status": self.status, "market_note": self.market_note, "server_time": now,
@@ -274,8 +279,8 @@ class PerpetualMonitor:
 
 
 @asynccontextmanager
-async def live_monitors(journal_path, instruments):
-    journal = SignalJournal(journal_path)
+async def live_monitors(journal_path, instruments, on_signal=None):
+    journal = SignalJournal(journal_path, on_signal)
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12), trust_env=True) as market_client, httpx.AsyncClient() as model_client:
         monitors = {key: PerpetualMonitor(key, market_client, model_client, journal) for key in instruments}
         try:

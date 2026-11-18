@@ -1,0 +1,15 @@
+.wechat-main { width: min(100% - 40px, 720px); margin: 36px auto; }
+.wechat-card { padding: 24px 0; border-top: 1px solid var(--line); }
+.wechat-card h2 { margin: 0 0 10px; }
+.wechat-card p { margin: 10px 0; line-height: 1.65; }
+.wechat-status { font-size: 13px; color: var(--muted); }
+.wechat-status[data-online="true"] { color: var(--positive); }
+.wechat-actions, .wechat-examples { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; }
+.wechat-examples code { background: var(--surface); border: 1px solid var(--line); border-radius: 5px; padding: 5px 8px; }
+.wechat-actions input { width: 120px; padding: 0 10px; }
+#qr { display: block; width: 228px; height: 228px; max-width: 100%; object-fit: contain; background: white; margin: 16px 0; }
+#qr[hidden], .wechat-card [hidden] { display: none; }
+@media (max-width: 600px) {
+  .workspace-nav { gap: 12px; }
+  .wechat-main { margin: 24px auto; }
+}

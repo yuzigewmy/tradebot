@@ -22,17 +22,33 @@ from .market import MarketFrame
 from .perpetual_api import INSTRUMENTS, router as perpetual_router
 from .perpetual_monitor import live_monitors
 from .service import ROOT, analyze, assemble, import_analysis, load_report
+from .wechat_api import router as wechat_router
+from .wechat_bridge import BindingStore, WechatBridge
+from .wechat_ilink import ILink
+from .wechat_research import WechatResearch, signal_message
 
 @asynccontextmanager
 async def lifespan(app):
-    async with live_monitors(ROOT / "data" / "perpetual-signals.jsonl", INSTRUMENTS) as monitors:
-        app.state.perpetual = monitors
-        yield
+    def forward_signal(signal):
+        bridge.publish(signal)
+
+    async with (httpx.AsyncClient() as wechat_client,
+                live_monitors(ROOT / "data" / "perpetual-signals.jsonl", INSTRUMENTS, forward_signal) as monitors):
+        research = WechatResearch(monitors, monitors[INSTRUMENTS[0]].model_client)
+        bridge = WechatBridge(ILink(wechat_client), BindingStore(ROOT / "data" / "wechat" / "binding.json"),
+                              research.answer, signal_message, research.active)
+        app.state.perpetual, app.state.wechat = monitors, bridge
+        bridge.start()
+        try:
+            yield
+        finally:
+            await bridge.close()
 
 
 app = FastAPI(title="加密研究台 API", version=__version__, lifespan=lifespan)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
 app.include_router(perpetual_router)
+app.include_router(wechat_router)
 SnapshotId = Annotated[str, PathParameter(pattern=r"^[a-f0-9]{24}$")]
 logger = logging.getLogger("spot_agent")
 
@@ -40,7 +56,7 @@ logger = logging.getLogger("spot_agent")
 @app.middleware("http")
 async def local_origin(request: Request, call_next):
     origin = request.headers.get("origin")
-    if request.method == "POST" and origin and origin != str(request.base_url).rstrip("/"):
+    if request.method in {"POST", "DELETE"} and origin and origin != str(request.base_url).rstrip("/"):
         return JSONResponse({"error": {"code": "ORIGIN", "message": "仅接受本地页面同源请求"}}, status_code=403)
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -139,6 +155,11 @@ def index():
 @app.get("/perpetual", include_in_schema=False)
 def perpetual_page():
     return FileResponse(ROOT / "web" / "perpetual.html")
+
+
+@app.get("/wechat", include_in_schema=False)
+def wechat_page():
+    return FileResponse(ROOT / "web" / "wechat.html")
 
 
 @app.get("/static/plotly.min.js")

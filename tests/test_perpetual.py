@@ -115,7 +115,8 @@ def test_review_publishes_exact_candidate_or_discards_on_expiry(tmp_path, monkey
     monkeypatch.setenv("SPOT_LLM_MODEL", "test-model")
     monkeypatch.setattr("spot_agent.perpetual_monitor.now_ms", lambda: now)
     monkeypatch.setattr("spot_agent.perpetual_monitor.quote", market_quote)
-    journal = SignalJournal(tmp_path / "signals.jsonl")
+    published = []
+    journal = SignalJournal(tmp_path / "signals.jsonl", published.append)
 
     async def evaluate_and_review():
         async with httpx.AsyncClient(transport=httpx.MockTransport(model_reply)) as client:
@@ -132,8 +133,10 @@ def test_review_publishes_exact_candidate_or_discards_on_expiry(tmp_path, monkey
     state = asyncio.run(evaluate_and_review())
     if late:
         assert state["signals"] == []
+        assert published == []
         assert state["review"]["status"] == "discarded"
     else:
         signal, = SignalJournal(journal.path).for_instrument("BTC-USDT-SWAP")
+        assert published == [signal]
         assert {key: signal[key] for key in model_candidates[0]} == model_candidates[0]
         assert state["active_signal_id"] == signal["id"]
