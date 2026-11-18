@@ -2,7 +2,7 @@
 
 from .contracts import TIMEFRAMES
 from .perpetual_market import WINDOW
-from .perpetual_strategy import detect_setup
+from .perpetual_strategy import detect_setup, detect_trend_setup
 
 
 def aggregate_minutes(rows, duration):
@@ -14,15 +14,19 @@ def aggregate_minutes(rows, duration):
                part[-1][4], sum(row[5] for row in part)]
 
 
-def candidate_jobs(instrument, rows, start, end):
+def candidate_jobs(instrument, rows, start, end, profile="v1"):
     minute = TIMEFRAMES["1m"]
     frames = {"1m": rows, **{tf: list(aggregate_minutes(rows, TIMEFRAMES[tf])) for tf in ("15m", "1h")}}
-    for closed_at in range(start, end, minute):
+    step = minute if profile == "v1" else TIMEFRAMES["15m"]
+    first_close = (start + step - 1) // step * step
+    detect = detect_setup if profile == "v1" else detect_trend_setup
+    for closed_at in range(first_close, end, step):
         windows = {}
         for tf, series in frames.items():
             duration = TIMEFRAMES[tf]
             index = (closed_at // duration * duration - series[0][0]) // duration
             windows[tf] = series[index - WINDOW:index]
-        analysis = detect_setup(windows)
+        analysis = detect(windows)
         if analysis["setup"]["strategy"]:
-            yield {"instrument": instrument, "closed_at": closed_at, "trigger_candle": windows["1m"][-1], **analysis}
+            trigger = "1m" if profile == "v1" else "15m"
+            yield {"instrument": instrument, "closed_at": closed_at, "trigger_candle": windows[trigger][-1], **analysis}

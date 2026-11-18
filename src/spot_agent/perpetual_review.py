@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from .agent import AgentError, response_text, responses_config
-from .perpetual_strategy import POLICY, POLICY_ID, SKILL, candidate_issue, exits_touched
+from .perpetual_strategy import PROFILES, candidate_issue, exits_touched, priced_candidate
 
 
 class SetupReview(BaseModel):
@@ -27,18 +27,33 @@ def review_timeout(candidate, now):
     return min(40, (candidate["expires_at"] - now) / 1000) if candidate else 40
 
 
-def revalidation_issue(candidate, setup, quote, forming, now):
-    issue = candidate_issue(candidate, setup, quote, now)
+def revalidation_issue(candidate, setup, quote, forming, now, *, profile="v1"):
+    issue = candidate_issue(candidate, setup, quote, now, profile=profile)
     if not issue and exits_touched(candidate, forming):
         return "复核期间成交已触及退出价位"
     return issue
 
 
-async def review_setup(client, event, timeout):
+def refresh_candidate(candidate, setup, quote, tick, forming, now, *, profile="v1"):
+    if profile == "v1":
+        issue = revalidation_issue(candidate, setup, quote, forming, now)
+        return (None, issue) if issue else (candidate, None)
+    if exits_touched(candidate, forming):
+        return None, "复核期间成交已触及退出价位"
+    refreshed, issue = priced_candidate(setup, quote, tick, candidate["closed_at"], now, profile=profile)
+    if issue:
+        return None, issue
+    # Recheck both the refreshed levels and the price path since the trigger.
+    issue = revalidation_issue(refreshed, setup, quote, forming, now, profile=profile)
+    return (None, issue) if issue else (refreshed, None)
+
+
+async def review_setup(client, event, timeout, *, profile="v1"):
+    policy, policy_id, skill = PROFILES[profile]
     url, headers, settings = responses_config()
     payload = settings | {
-        "instructions": SKILL,
-        "input": [{"role": "user", "content": json.dumps({"policy_id": POLICY_ID, "policy": POLICY, "event": event}, ensure_ascii=False)}],
+        "instructions": skill,
+        "input": [{"role": "user", "content": json.dumps({"policy_id": policy_id, "policy": policy, "event": event}, ensure_ascii=False)}],
         "max_output_tokens": 3800,
         "text": {"format": {"type": "json_schema", "name": "perpetual_review", "strict": True, "schema": SetupReview.model_json_schema()}},
     }

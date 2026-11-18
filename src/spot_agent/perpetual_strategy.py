@@ -14,22 +14,29 @@ SKILL_PATH = Path(__file__).resolve().parents[2] / "skills" / "perpetual-entry"
 SKILL = (SKILL_PATH / "SKILL.md").read_text(encoding="utf-8")
 POLICY = json.loads((SKILL_PATH / "policy.json").read_text(encoding="utf-8"))
 POLICY_ID = hashlib.sha256((SKILL + json.dumps(POLICY, sort_keys=True)).encode()).hexdigest()[:12]
+TREND_SKILL = (SKILL_PATH / "15m-review.md").read_text(encoding="utf-8")
+TREND_POLICY = POLICY | json.loads((SKILL_PATH / "15m-policy.json").read_text(encoding="utf-8"))
+TREND_POLICY_ID = hashlib.sha256((TREND_SKILL + json.dumps(TREND_POLICY, sort_keys=True)).encode()).hexdigest()[:12]
+PROFILES = {"v1": (POLICY, POLICY_ID, SKILL), "v2": (TREND_POLICY, TREND_POLICY_ID, TREND_SKILL)}
 
 
-def _indicators(rows):
+def _indicators(rows, policy=POLICY):
     high, low, close, volume = np.asarray(rows, dtype=float)[:, 2:6].T
-    fast = talib.EMA(close, timeperiod=POLICY["ema_fast"])
-    slow = talib.EMA(close, timeperiod=POLICY["ema_slow"])
+    fast = talib.EMA(close, timeperiod=policy["ema_fast"])
+    slow = talib.EMA(close, timeperiod=policy["ema_slow"])
     atr = talib.ATR(high, low, close, timeperiod=14)
     upper, center, lower = talib.BBANDS(close, timeperiod=20, nbdevup=2, nbdevdn=2, matype=0)
     baseline = volume[-21:-1].mean()
-    return {
+    values = {
         "close": float(close[-1]), "ema_fast": float(fast[-1]), "ema_slow": float(slow[-1]), "prev_ema_fast": float(fast[-2]),
         "adx": float(talib.ADX(high, low, close, timeperiod=14)[-1]), "rsi": float(talib.RSI(close, timeperiod=14)[-1]),
         "atr": float(atr[-1]), "atr_reference": float(np.median(atr[-61:-1])),
         "volume_ratio": float(volume[-1] / baseline) if baseline > 0 else 0.0,
         "widths": (upper - lower) / center,
     }
+    if "trend_slope_bars" in policy:
+        values["ema_slope"] = float(fast[-1] - fast[-1 - policy["trend_slope_bars"]])
+    return values
 
 
 def _bias(values):
@@ -87,6 +94,43 @@ def detect_setup(windows):
     return {"context": context, "setup": setup}
 
 
+def detect_trend_setup(windows):
+    policy = TREND_POLICY
+    context = {}
+    for tf, rows in windows.items():
+        values = _indicators(rows, policy)
+        context[tf] = {"closed_at": rows[-1][0] + TIMEFRAMES[tf], "bias": _bias(values),
+                       **{k: values[k] for k in ("close", "ema_fast", "ema_slow", "ema_slope", "adx", "rsi", "atr", "volume_ratio")}}
+    hourly, trigger = context["1h"], context["15m"]
+    sign = {"long": 1, "short": -1, "mixed": 0}[hourly["bias"]]
+    aligned = bool(sign and hourly["bias"] == trigger["bias"] and sign * hourly["ema_slope"] > 0)
+    trend = aligned and hourly["adx"] >= policy["trend_adx_min"]
+    fresh_close = context["1m"]["closed_at"] == trigger["closed_at"]
+    bars = windows["15m"]
+    prior = bars[-policy["breakout_window"] - 1:-1]
+    high = max(row[2] for row in prior)
+    low = min(row[3] for row in prior)
+    close, atr = trigger["close"], trigger["atr"]
+    edge = high if sign > 0 else low
+    crossed = bool(sign and sign * (close - edge) > atr * policy["breakout_atr_buffer"])
+    wick, previous_edge = (bars[-1][3], bars[-2][2]) if sign > 0 else (bars[-1][2], bars[-2][3])
+    reclaimed = bool(sign and sign * (wick - trigger["ema_fast"]) <= 0 and sign * (close - previous_edge) > 0)
+    volume_ratio = trigger["volume_ratio"]
+    setup = {"side": hourly["bias"] if aligned else "mixed", "strategy": None, "close": close, "atr": atr,
+             "volume_ratio": volume_ratio, "prior_high": high, "prior_low": low, "range_cross": crossed, "ema_reclaimed": reclaimed,
+             "regime": "trend" if trend else "observe", "trend_pass": trend, "fresh_trigger": fresh_close,
+             "breakout_volume_pass": volume_ratio >= policy["breakout_volume_min"],
+             "pullback_volume_pass": volume_ratio >= policy["pullback_volume_min"]}
+    if trend and fresh_close and atr > 0:
+        if crossed and setup["breakout_volume_pass"]:
+            setup.update(strategy="channel_breakout", stop_anchor=edge)
+        elif reclaimed and setup["pullback_volume_pass"]:
+            recent = bars[-policy["pullback_stop_window"]:]
+            anchor = min(row[3] for row in recent) if sign > 0 else max(row[2] for row in recent)
+            setup.update(strategy="trend_pullback", stop_anchor=anchor)
+    return {"context": context, "setup": setup}
+
+
 def _round_to_tick(price, tick, upward):
     units = Decimal(str(price)) / tick
     return float(units.to_integral_value(rounding=ROUND_CEILING if upward else ROUND_FLOOR) * tick)
@@ -103,13 +147,14 @@ def quote_issue(quote, now):
     return None
 
 
-def funding_cost_rate(long, quote, now):
-    if now <= quote["funding_at"] <= now + POLICY["funding_horizon_minutes"] * 60_000:
+def funding_cost_rate(long, quote, now, policy=POLICY):
+    if now <= quote["funding_at"] <= now + policy["funding_horizon_minutes"] * 60_000:
         return max(0.0, (1 if long else -1) * quote["funding_rate"])
     return 0.0
 
 
-def priced_candidate(setup, quote, tick, closed_at, now):
+def priced_candidate(setup, quote, tick, closed_at, now, *, profile="v1"):
+    policy, policy_id, _ = PROFILES[profile]
     if now >= closed_at + TIMEFRAMES["1m"]:
         return None, "开仓窗口已过期"
     if issue := quote_issue(quote, now):
@@ -118,20 +163,28 @@ def priced_candidate(setup, quote, tick, closed_at, now):
     sign = 1 if long else -1
     entry = _round_to_tick(quote["ask"] if long else quote["bid"], tick, long)
     atr = setup["atr"]
-    if abs(entry - setup["close"]) > POLICY["max_entry_drift_atr"] * atr:
+    if abs(entry - setup["close"]) > policy["max_entry_drift_atr"] * atr:
         return None, "盘口已离开触发收盘价附近"
-    structural_stop = setup["stop_anchor"] - sign * POLICY["stop_atr_buffer"] * atr
-    stop_distance = max(sign * (entry - structural_stop), atr * POLICY["min_stop_atr"])
+    structural_stop = setup["stop_anchor"] - sign * policy["stop_atr_buffer"] * atr
+    stop_distance = max(sign * (entry - structural_stop), atr * policy["min_stop_atr"])
     stop = _round_to_tick(entry - sign * stop_distance, tick, not long)
-    if stop <= 0 or abs(entry - stop) > atr * POLICY["max_stop_atr"]:
+    distance = sign * (entry - stop)
+    if stop <= 0 or not 0 < distance <= atr * policy["max_stop_atr"]:
         return None, "结构止损距离超出波动限制"
-    funding_cost = funding_cost_rate(long, quote, now)
-    fee, slippage = POLICY["fee_rate"], POLICY["slippage_rate"]
-    entry_multiplier = (1 + sign * slippage) * (1 + sign * fee)
+    funding_cost = funding_cost_rate(long, quote, now, policy)
+    fee, slippage = policy["fee_rate"], policy["slippage_rate"]
+    entry_slippage = slippage if profile == "v1" else 0
+    entry_multiplier = (1 + sign * entry_slippage) * (1 + sign * fee)
     exit_multiplier = (1 - sign * slippage) * (1 - sign * fee)
     funding = entry * funding_cost
     risk = sign * (entry * entry_multiplier - stop * exit_multiplier) + funding
-    target = (entry * entry_multiplier + sign * (risk * POLICY["take_profit_r"] + funding)) / exit_multiplier
+    extras = {}
+    if profile == "v2":
+        cost_ratio = (risk - distance + quote["ask"] - quote["bid"]) / distance
+        if cost_ratio > policy["max_cost_to_stop"]:
+            return None, "预估交易成本超过结构止损距离的四分之一"
+        extras = {"cost_to_stop": cost_ratio, "exit_at": closed_at + policy["max_hold_minutes"] * TIMEFRAMES["1m"]}
+    target = (entry * entry_multiplier + sign * (risk * policy["take_profit_r"] + funding)) / exit_multiplier
     target = _round_to_tick(target, tick, long)
     if target <= 0:
         return None, "按费用计算的目标价不可用"
@@ -141,11 +194,12 @@ def priced_candidate(setup, quote, tick, closed_at, now):
         "net_reward_risk": round(reward / risk, 4), "risk_per_unit": risk, "funding_cost_rate": funding_cost,
         "entry_reference": "best_ask" if long else "best_bid", "exit_reference": "last_trade",
         "closed_at": closed_at, "expires_at": closed_at + TIMEFRAMES["1m"],
-        "policy_version": POLICY["version"], "policy_id": POLICY_ID,
+        "policy_version": policy["version"], "policy_id": policy_id, **extras,
     }, None
 
 
-def candidate_issue(candidate, setup, quote, now):
+def candidate_issue(candidate, setup, quote, now, *, profile="v1"):
+    policy, _, _ = PROFILES[profile]
     if now >= candidate["expires_at"]:
         return "模型复核结束时，开仓窗口已过期"
     if issue := quote_issue(quote, now):
@@ -154,12 +208,12 @@ def candidate_issue(candidate, setup, quote, now):
     bid_or_ask = quote["ask"] if long else quote["bid"]
     if (bid_or_ask > candidate["entry"] if long else bid_or_ask < candidate["entry"]):
         return "复核后盘口无法按候选价或更优价入场"
-    if abs(bid_or_ask - setup["close"]) > POLICY["max_entry_drift_atr"] * setup["atr"]:
+    if abs(bid_or_ask - setup["close"]) > policy["max_entry_drift_atr"] * setup["atr"]:
         return "复核后盘口已离开触发收盘价附近"
     bottom, top = sorted((candidate["stop_loss"], candidate["take_profit"]))
     if not (bottom < quote["last"] < top and bottom < bid_or_ask < top):
         return "复核后成交价或盘口已到达退出区间"
-    if funding_cost_rate(long, quote, now) > candidate["funding_cost_rate"]:
+    if funding_cost_rate(long, quote, now, policy) > candidate["funding_cost_rate"]:
         return "复核后预计承担的资金费上升"
     return None
 
@@ -171,5 +225,6 @@ def exits_touched(candidate, candle):
     return candle[3] <= lower or candle[2] >= upper
 
 
-def signal_cooldown(previous, closed_at):
-    return previous is not None and closed_at - previous < POLICY["signal_cooldown_minutes"] * TIMEFRAMES["1m"]
+def signal_cooldown(previous, closed_at, *, profile="v1"):
+    policy, _, _ = PROFILES[profile]
+    return previous is not None and closed_at - previous < policy["signal_cooldown_minutes"] * TIMEFRAMES["1m"]
