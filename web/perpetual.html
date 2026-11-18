@@ -21,6 +21,7 @@
     <form id="monitor-form" class="toolbar">
       <label>合约<select id="instrument"><option value="BTC-USDT-SWAP">BTC / USDT</option><option value="ETH-USDT-SWAP">ETH / USDT</option></select></label>
       <label>监控方式<select id="review-mode"><option value="observe">行情观察</option><option value="signals">复核并推送信号</option></select></label>
+      <label>开仓策略<select id="strategy-select"><option value="all">回踩与突破</option><option value="channel_breakout">仅区间突破</option><option value="trend_pullback">仅趋势回踩</option></select></label>
       <button class="primary" id="start-monitor" type="submit" disabled>启动监控</button>
       <button class="secondary" id="stop-monitor" type="button" disabled>停止监控</button>
       <span id="model-config" class="toolbar-note"></span>

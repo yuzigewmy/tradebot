@@ -22,7 +22,7 @@ from .perpetual_market import InstrumentRules, instrument_rules
 from .perpetual_replay import Replay, publish_replay_signals
 from .perpetual_replay_data import jobs_path, prepare_market, prepare_seconds
 from .perpetual_replay_review import review_signature, run_reviews, trace_path
-from .perpetual_strategy import PROFILES
+from .perpetual_strategy import PROFILES, V2_STRATEGIES
 
 
 def timestamp(raw):
@@ -66,7 +66,7 @@ async def run(options):
     books = cache / ("books" if profile == "v1" else f"books-{policy_id}")
     seconds = cache / "seconds"
     reviews_path = options.review_cache or cache / f"reviews-{review_signature(profile)}"
-    destination = options.out or cache / "result"
+    destination = options.out or cache / ("result" if options.strategy == "all" else f"result-{options.strategy}")
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=40), trust_env=True) as client:
         history = OkxHistory(client, cache)
         rules = await rules_snapshot(client, cache / f"rules-{start}-{end}.json")
@@ -78,6 +78,8 @@ async def run(options):
         if options.stage == "data":
             print(f"行情已准备：{len(jobs)} 个候选", flush=True)
             return
+        if options.strategy != "all":
+            jobs = [job for job in jobs if job["setup"]["strategy"] == options.strategy]
         funding = {inst: dict(load(market / f"{inst}-funding.json")) for inst in INSTRUMENTS}
         if options.stage in ("all", "review"):
             if not model_configured():
@@ -99,7 +101,7 @@ async def run(options):
         if not any("model_review" in trace for trace in reviews) and any(trace["status"] == "model_error" for trace in reviews):
             raise AgentError("没有成功的模型研判，不能据此报告策略收益")
         config = {k.lower(): os.environ.get(f"SPOT_LLM_{k}") for k in ("MODEL", "REASONING_EFFORT", "SERVICE_TIER")}
-        result = export(destination, replay, reviews, counts, config, profile=profile)
+        result = export(destination, replay, reviews, counts, config, profile=profile, strategy=options.strategy)
         print(f"期末权益 {result['ending_equity']:.6f} USDT，收益 {result['return_pct']:+.4f}%，报告 {destination.resolve()}", flush=True)
 
 
@@ -108,6 +110,7 @@ def main():
     parser.add_argument("--start", type=timestamp, required=True)
     parser.add_argument("--end", type=timestamp, required=True)
     parser.add_argument("--profile", choices=("v1", "v2"), default="v2")
+    parser.add_argument("--strategy", choices=("all", *V2_STRATEGIES), default="all")
     parser.add_argument("--stage", choices=("all", "data", "review", "report"), default="all")
     parser.add_argument("--cache", type=Path)
     parser.add_argument("--out", type=Path)
@@ -116,6 +119,8 @@ def main():
     parser.add_argument("--model-workers", type=int, default=16)
     parser.add_argument("--follow", action="store_true", help="等待另一个进程准备数据或研判")
     options = parser.parse_args()
+    if options.profile == "v1" and options.strategy != "all":
+        parser.error("单独选择策略仅用于 v2")
     if options.end - options.start < MINUTE or options.book_workers < 1 or options.model_workers < 1:
         parser.error("截止时间必须晚于开始时间，工作进程数须大于零")
     if options.follow and options.stage not in ("review", "report"):

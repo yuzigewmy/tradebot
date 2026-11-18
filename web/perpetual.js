@@ -140,8 +140,11 @@ async function refresh(resetMode = false) {
   if (command) return;
   const data = await request();
   if (!command && data.instrument === $("#instrument").value) {
+    if (resetMode || !snapshot) {
+      $("#review-mode").value = data.mode;
+      $("#strategy-select").value = data.selected_strategy;
+    }
     snapshot = data;
-    if (resetMode) $("#review-mode").value = snapshot.mode;
     $("#monitor-error").hidden = true;
     render();
   }
@@ -150,12 +153,13 @@ async function refresh(resetMode = false) {
 async function changeMonitor(action, body) {
   command = true;
   $("#instrument").disabled = true;
+  $("#strategy-select").disabled = true;
   $("#start-monitor").disabled = true;
   $("#stop-monitor").disabled = true;
   $("#monitor-error").hidden = true;
   try { snapshot = await request(action, body); }
   catch (error) { showError(error); }
-  finally { command = false; $("#instrument").disabled = false; render(); }
+  finally { command = false; $("#instrument").disabled = false; $("#strategy-select").disabled = false; render(); }
 }
 
 $("#instrument").addEventListener("change", () => {
@@ -163,7 +167,10 @@ $("#instrument").addEventListener("change", () => {
   $("#stop-monitor").disabled = true;
   refresh(true).catch(showError);
 });
-$("#monitor-form").addEventListener("submit", (event) => { event.preventDefault(); changeMonitor("/start", {mode: $("#review-mode").value}); });
+$("#monitor-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  changeMonitor("/start", {mode: $("#review-mode").value, strategy: $("#strategy-select").value});
+});
 $("#stop-monitor").addEventListener("click", () => changeMonitor("/stop", {}));
 document.querySelectorAll("[data-period]").forEach((button) => button.addEventListener("click", () => {
   period = button.dataset.period;

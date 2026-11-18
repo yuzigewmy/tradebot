@@ -10,6 +10,7 @@ router = APIRouter(prefix="/api/perpetual", tags=["永续合约"])
 
 class MonitorOptions(BaseModel):
     mode: Literal["observe", "signals"] = "observe"
+    strategy: Literal["all", "channel_breakout", "trend_pullback"] = "all"
 
 
 @router.get("/{instrument}")
@@ -20,7 +21,7 @@ async def monitor_status(instrument: Instrument, request: Request):
 @router.post("/{instrument}/start")
 async def start_monitor(instrument: Instrument, body: MonitorOptions, request: Request):
     monitor = request.app.state.perpetual[instrument]
-    monitor.start(body.mode)
+    monitor.start(body.mode, body.strategy)
     return monitor.view()
 
 

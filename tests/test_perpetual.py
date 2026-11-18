@@ -165,3 +165,19 @@ def test_trend_candidate_requires_fresh_fifteen_minute_close_and_cost_budget():
     assert issue is None and refreshed["entry"] == 101.02
     thin = dict(setup, atr=0.15, stop_anchor=101)
     assert priced_candidate(thin, prices, tick, end, end, profile="v2")[1] == "预估交易成本超过结构止损距离的四分之一"
+
+
+@pytest.mark.parametrize("mode,strategy,queued", [("observe", "all", False), ("signals", "trend_pullback", False),
+                                                  ("signals", "channel_breakout", True)])
+def test_monitor_only_queues_the_selected_strategy(mode, strategy, queued, tmp_path, monkeypatch):
+    end = 1794960000000
+    bars = rising_context(end)
+    bars["15m"][-1][2:6] = [101, 99, 101, 18]
+    monkeypatch.setattr("spot_agent.perpetual_monitor.now_ms", lambda: end + 1000)
+    monitor = PerpetualMonitor("BTC-USDT-SWAP", None, None, SignalJournal(tmp_path / "signals.jsonl"))
+    monitor.mode, monitor.selected_strategy = mode, strategy
+    monitor.last_evaluated = end - TIMEFRAMES["1m"]
+    monitor.bars = bars
+    monitor.evaluate()
+    assert monitor.evaluation["setup"]["strategy"] == "channel_breakout"
+    assert monitor.review_requested.is_set() == queued

@@ -18,6 +18,7 @@ TREND_SKILL = (SKILL_PATH / "15m-review.md").read_text(encoding="utf-8")
 TREND_POLICY = POLICY | json.loads((SKILL_PATH / "15m-policy.json").read_text(encoding="utf-8"))
 TREND_POLICY_ID = hashlib.sha256((TREND_SKILL + json.dumps(TREND_POLICY, sort_keys=True)).encode()).hexdigest()[:12]
 PROFILES = {"v1": (POLICY, POLICY_ID, SKILL), "v2": (TREND_POLICY, TREND_POLICY_ID, TREND_SKILL)}
+V2_STRATEGIES = ("channel_breakout", "trend_pullback")
 
 
 def _indicators(rows, policy=POLICY):

@@ -19,6 +19,7 @@ from .perpetual_market import instrument_rules, now_ms, quote
 from .perpetual_monitor import PerpetualMonitor, SignalJournal
 from .perpetual_paper import PaperAccount, process_second
 from .perpetual_replay_data import INITIAL_DELAY, REFRESH_DELAY
+from .perpetual_strategy import V2_STRATEGIES
 
 
 class LivePaper:
@@ -90,7 +91,7 @@ class LivePaper:
             await asyncio.sleep(.35)
 
 
-async def run(output, duration, profile):
+async def run(output, duration, profile, strategy="all"):
     output.mkdir(parents=True)
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15), trust_env=True) as market, httpx.AsyncClient() as model:
         specs = await asyncio.gather(*(instrument_rules(market, inst) for inst in INSTRUMENTS))
@@ -98,7 +99,7 @@ async def run(output, duration, profile):
         journal = SignalJournal(output / "signals.jsonl")
         monitors = [PerpetualMonitor(inst, market, model, journal, paper=paper, profile=profile) for inst in INSTRUMENTS]
         for monitor in monitors:
-            monitor.start("signals")
+            monitor.start("signals", strategy)
         print(f"模拟账户已启动，账本：{output.resolve()}", flush=True)
         try:
             async with asyncio.timeout(duration):
@@ -117,11 +118,14 @@ def main():
     parser.add_argument("--out", type=Path, default=Path("data/paper-live") / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
     parser.add_argument("--duration", type=int, help="Seconds; by default the simulation runs until stopped")
     parser.add_argument("--profile", choices=("v1", "v2"), default="v2")
+    parser.add_argument("--strategy", choices=("all", *V2_STRATEGIES), default="all")
     args = parser.parse_args()
+    if args.profile == "v1" and args.strategy != "all":
+        parser.error("单独选择策略仅用于 v2")
     load_dotenv(Path(__file__).resolve().parents[2] / ".env")
     if not model_configured():
         raise AgentError("未配置模型，模拟账户未启动")
-    asyncio.run(run(args.out, args.duration, args.profile))
+    asyncio.run(run(args.out, args.duration, args.profile, args.strategy))
 
 
 if __name__ == "__main__":

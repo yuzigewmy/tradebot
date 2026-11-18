@@ -50,6 +50,7 @@ class PerpetualMonitor:
         self.paper = paper
         self.profile = profile
         self.mode = "observe"
+        self.selected_strategy = "all"
         self.task = None
         self.status = "stopped"
         self.market_note = "监控未启动"
@@ -67,10 +68,11 @@ class PerpetualMonitor:
     def running(self):
         return self.task is not None and not self.task.done()
 
-    def start(self, mode):
-        if mode != self.mode:
+    def start(self, mode, strategy="all"):
+        if (mode, strategy) != (self.mode, self.selected_strategy):
             self.invalidate_review("监控方式已切换")
-        self.mode = mode
+            self.review_state = None
+        self.mode, self.selected_strategy = mode, strategy
         if not self.running:
             self.status, self.market_note = "connecting", "连接 OKX 并加载 K 线"
             self.task = asyncio.create_task(self.run())
@@ -184,6 +186,8 @@ class PerpetualMonitor:
             return
         if not setup["strategy"] or initial or end <= self.skip_through or not 0 <= now_ms() - end < MINUTE:
             return
+        if self.selected_strategy not in ("all", setup["strategy"]):
+            return
         _, policy_id, _ = PROFILES[self.profile]
         last = next((row["closed_at"] for row in self.journal.for_instrument(self.instrument) if row["policy_id"] == policy_id), None)
         if signal_cooldown(last, end, profile=self.profile):
@@ -258,6 +262,7 @@ class PerpetualMonitor:
     def signal_is_active(self, signal, now):
         return (self.mode == "signals" and self.status == "online" and self.skip_through < signal["closed_at"] and now < signal["expires_at"]
                 and signal["policy_id"] == PROFILES[self.profile][1]
+                and self.selected_strategy in ("all", signal["strategy"])
                 and not exits_touched(signal, self.forming["1m"]))
 
     def view(self):
@@ -267,7 +272,7 @@ class PerpetualMonitor:
             active_id = signals[0]["id"]
         policy, policy_id, _ = PROFILES[self.profile]
         return {
-            "instrument": self.instrument, "mode": self.mode, "running": self.running,
+            "instrument": self.instrument, "mode": self.mode, "selected_strategy": self.selected_strategy, "running": self.running,
             "status": self.status, "market_note": self.market_note, "server_time": now,
             "model_configured": model_configured(), "policy_id": policy_id, "policy_version": policy["version"],
             "charts": {tf: {"closed": bars[-100:], "current": self.forming[tf]} for tf, bars in self.bars.items()},

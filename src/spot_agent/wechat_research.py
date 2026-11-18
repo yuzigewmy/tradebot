@@ -58,12 +58,16 @@ class SignalArgs(NoArguments):
     asset: Literal["BTC", "ETH", "all"]
 
 
+class BacktestArgs(NoArguments):
+    strategy: Literal["all", "channel_breakout", "trend_pullback"]
+
+
 TOOL_SCHEMAS = {
     "market_snapshot": (MarketArgs, "读取 OKX 最新已收盘 K 线指标、结构和趋势证据。现货有日线、四小时、一小时。永续有一小时、十五分钟、一分钟。"),
     "perpetual_quote": (AssetArgs, "读取 OKX USDT 永续最新成交价、买卖一档、标记价、资金费率及时间。"),
     "recent_signals": (SignalArgs, "查询 BTC、ETH 或两者最近的正式开仓信号、有效状态、开仓参考、止盈和止损。"),
     "monitor_status": (NoArguments, "查询 BTC 与 ETH 永续监控是否运行、最新收盘时间和状态。"),
-    "backtest_summary": (NoArguments, "读取本地最近一次已保存的永续模拟报告，包括时间区间、执行假设、收益、回撤和成本。"),
+    "backtest_summary": (BacktestArgs, "读取本地最近一次指定策略的永续模拟报告。查询组合时用 all，单独查询区间突破或趋势回踩时用对应策略。"),
 }
 TOOLS = [{"type": "function", "name": name, "description": description, "strict": True,
           "parameters": arguments.model_json_schema()} for name, (arguments, description) in TOOL_SCHEMAS.items()]
@@ -170,11 +174,12 @@ class WechatResearch:
                     instruments = self.monitors if args.asset == "all" else (f"{args.asset}-USDT-SWAP",)
                     return {"checked_at_beijing": time_label(now_ms()), "signals": {inst: self.recent(inst) for inst in instruments}}
                 case "monitor_status":
-                    return {inst: {"running": m.running, "mode": m.mode, "status": m.status, "note": m.market_note,
+                    return {inst: {"running": m.running, "mode": m.mode, "selected_strategy": m.selected_strategy,
+                                   "status": m.status, "note": m.market_note,
                                    "last_close_beijing": time_label(m.evaluation["closed_at"]) if m.evaluation else None}
                             for inst, m in self.monitors.items()}
                 case "backtest_summary":
-                    return self.backtest()
+                    return self.backtest(args.strategy)
         except (MarketError, aiohttp.ClientError, ccxt.BaseError, TimeoutError, json.JSONDecodeError) as error:
             log.warning("微信工具 %s 未取得数据（%s）", name, type(error).__name__)
             return {"error": "本次未取得该工具的数据"}
@@ -188,16 +193,18 @@ class WechatResearch:
                  "exit_at_beijing": time_label(signal["exit_at"]) if "exit_at" in signal else None}
                 for signal in signals]
 
-    def backtest(self):
-        paths = (ROOT / "artifacts").glob("perpetual-backtest-*/summary.json")
-        path = max(paths, key=lambda report: report.stat().st_mtime, default=None)
-        if path is None:
-            return {"error": "本机没有已保存的永续回测报告"}
-        report = json.loads(path.read_text(encoding="utf-8"))
+    def backtest(self, strategy):
+        paths = sorted((ROOT / "artifacts").glob("perpetual-backtest-*/summary.json"), key=lambda path: path.stat().st_mtime, reverse=True)
         fields = ("start_utc", "end_utc_exclusive", "initial_equity", "ending_equity", "net_pnl", "return_pct", "closed_trades",
                   "win_rate_pct", "profit_factor", "max_drawdown_pct", "total_fees", "net_funding", "leverage", "risk_fraction",
                   "fee_rate", "exit_slippage", "exit_counts", "groups")
-        return {"kind": "历史模拟", "exchange": "OKX", "instruments": list(report["rules"]), **{key: report[key] for key in fields}}
+        for path in paths:
+            report = json.loads(path.read_text(encoding="utf-8"))
+            if report.get("selected_strategy", "all") == strategy:
+                return {"kind": "历史模拟", "exchange": "OKX", "instruments": list(report["rules"]),
+                        "policy_version": report.get("policy_version", "perpetual-entry/v1"), "selected_strategy": strategy,
+                        **{key: report[key] for key in fields}}
+        return {"error": "本机没有该策略的回测报告"}
 
     async def snapshot(self, asset, market):
         if market == "spot":
