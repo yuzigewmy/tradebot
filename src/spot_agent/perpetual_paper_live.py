@@ -18,7 +18,7 @@ from .perpetual_history import FUNDING_INTERVAL, MARK, SECOND, TRADE, OkxHistory
 from .perpetual_market import instrument_rules, now_ms, quote
 from .perpetual_monitor import PerpetualMonitor, SignalJournal
 from .perpetual_paper import PaperAccount, process_second
-from .perpetual_replay_data import INITIAL_DELAY, REFRESH_DELAY, settled_quote
+from .perpetual_replay_data import INITIAL_DELAY, REFRESH_DELAY
 
 
 class LivePaper:
@@ -45,8 +45,7 @@ class LivePaper:
             await asyncio.sleep(REFRESH_DELAY / SECOND)
         else:
             await asyncio.sleep(max(0, closed_at + INITIAL_DELAY - now_ms()) / SECOND)
-        market, rates = await asyncio.gather(quote(self.history.client, inst), self.rates(inst))
-        return market | settled_quote(now_ms(), rates)
+        return await quote(self.history.client, inst, settled=True)
 
     def enqueue(self, signal):
         at = (signal["published_at"] + SECOND - 1) // SECOND * SECOND
@@ -91,15 +90,15 @@ class LivePaper:
             await asyncio.sleep(.35)
 
 
-async def run(output, duration):
+async def run(output, duration, profile):
     output.mkdir(parents=True)
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15), trust_env=True) as market, httpx.AsyncClient() as model:
         specs = await asyncio.gather(*(instrument_rules(market, inst) for inst in INSTRUMENTS))
         paper = LivePaper(OkxHistory(market, output / "market"), dict(zip(INSTRUMENTS, specs, strict=True)), output)
         journal = SignalJournal(output / "signals.jsonl")
-        monitors = [PerpetualMonitor(inst, market, model, journal, paper=paper) for inst in INSTRUMENTS]
+        monitors = [PerpetualMonitor(inst, market, model, journal, paper=paper, profile=profile) for inst in INSTRUMENTS]
         for monitor in monitors:
-            monitor.start("changes")
+            monitor.start("signals")
         print(f"模拟账户已启动，账本：{output.resolve()}", flush=True)
         try:
             async with asyncio.timeout(duration):
@@ -117,11 +116,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, default=Path("data/paper-live") / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
     parser.add_argument("--duration", type=int, help="Seconds; by default the simulation runs until stopped")
+    parser.add_argument("--profile", choices=("v1", "v2"), default="v2")
     args = parser.parse_args()
     load_dotenv(Path(__file__).resolve().parents[2] / ".env")
     if not model_configured():
         raise AgentError("未配置模型，模拟账户未启动")
-    asyncio.run(run(args.out, args.duration))
+    asyncio.run(run(args.out, args.duration, args.profile))
 
 
 if __name__ == "__main__":

@@ -11,12 +11,11 @@ from zipfile import ZipFile
 
 import aiohttp
 
-from .perpetual_market import MarketError, OKX_HTTP, parse_candle
+from .perpetual_market import FUNDING_INTERVAL, MarketError, OKX_HTTP, parse_candle
 
 SECOND = 1000
 MINUTE = 60 * SECOND
 DAY = 1440 * MINUTE
-FUNDING_INTERVAL = 8 * 60 * MINUTE
 TRADE_ARCHIVE_TZ = timezone(timedelta(hours=8))
 PAGE = 300
 TRADE = "market/history-candles"

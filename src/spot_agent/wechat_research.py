@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from .agent import AgentError, model_configured, responses_config
 from .contracts import AnalyzeInput, TIMEFRAMES
 from .perpetual_market import BARS, MarketError, closed_windows, history, now_ms, quote
-from .perpetual_strategy import detect_setup
+from .perpetual_strategy import detect_trend_setup
 from .service import ROOT, analyze
 
 log = logging.getLogger(__name__)
@@ -23,7 +23,8 @@ PROMPT = ROOT / "prompts" / "wechat-assistant.md"
 BEIJING = ZoneInfo("Asia/Shanghai")
 MINUTE = TIMEFRAMES["1m"]
 SIDES = {"long": "做多", "short": "做空"}
-STRATEGIES = {"pullback": "趋势回踩", "breakout": "收缩放量突破"}
+STRATEGIES = {"pullback": "旧版趋势回踩", "breakout": "旧版收缩放量突破",
+              "trend_pullback": "十五分钟趋势回踩", "channel_breakout": "十五分钟区间突破"}
 
 
 def time_label(ts):
@@ -31,13 +32,14 @@ def time_label(ts):
 
 
 def signal_message(signal):
+    hold = f"\n持仓截止　{time_label(signal['exit_at'])}（北京时间）" if "exit_at" in signal else ""
     return (f"【OKX 永续开仓信号】\n{signal['instrument']} · {SIDES[signal['side']]}\n"
             f"策略　{STRATEGIES[signal['strategy']]}\n"
             f"开仓参考　{signal['entry']} USDT\n"
             f"止盈　{signal['take_profit']} USDT\n"
             f"止损　{signal['stop_loss']} USDT\n"
             f"费用后收益风险比　{signal['net_reward_risk']} R\n"
-            f"有效至　{time_label(signal['expires_at'])}（北京时间）")
+            f"入场有效至　{time_label(signal['expires_at'])}（北京时间）{hold}")
 
 
 class NoArguments(BaseModel):
@@ -168,7 +170,7 @@ class WechatResearch:
                     instruments = self.monitors if args.asset == "all" else (f"{args.asset}-USDT-SWAP",)
                     return {"checked_at_beijing": time_label(now_ms()), "signals": {inst: self.recent(inst) for inst in instruments}}
                 case "monitor_status":
-                    return {inst: {"running": m.running, "status": m.status, "note": m.market_note,
+                    return {inst: {"running": m.running, "mode": m.mode, "status": m.status, "note": m.market_note,
                                    "last_close_beijing": time_label(m.evaluation["closed_at"]) if m.evaluation else None}
                             for inst, m in self.monitors.items()}
                 case "backtest_summary":
@@ -182,7 +184,8 @@ class WechatResearch:
         signals = self.monitors[instrument].journal.for_instrument(instrument)[:3]
         return [{**{field: signal[field] for field in fields}, "active": self.active(signal),
                  "strategy_name": STRATEGIES[signal["strategy"]], "direction": SIDES[signal["side"]],
-                 "published_at_beijing": time_label(signal["published_at"]), "expires_at_beijing": time_label(signal["expires_at"])}
+                 "published_at_beijing": time_label(signal["published_at"]), "expires_at_beijing": time_label(signal["expires_at"]),
+                 "exit_at_beijing": time_label(signal["exit_at"]) if "exit_at" in signal else None}
                 for signal in signals]
 
     def backtest(self):
@@ -216,7 +219,7 @@ class WechatResearch:
             windows = closed_windows(bars, end)
             if windows is None or now_ms() - end >= 2 * MINUTE:
                 raise MarketError("各周期最新收盘线未齐全")
-            snapshot = {"closed_at": end, **detect_setup(windows)}
+            snapshot = {"closed_at": end, **detect_trend_setup(windows)}
         return {"exchange": "OKX", "instrument": instrument, "market": "perpetual", **snapshot,
                 "as_of_beijing": time_label(snapshot["closed_at"]),
                 "closed_at_beijing_by_timeframe": {tf: time_label(row["closed_at"]) for tf, row in snapshot["context"].items()}}

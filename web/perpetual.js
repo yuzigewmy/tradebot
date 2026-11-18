@@ -5,10 +5,10 @@ const price = (value) => formatter.format(value);
 const clock = (value) => timeFormat.format(value);
 const periodNames = {"1m": "1m", "15m": "15m", "1h": "1H"};
 const sides = {long: "做多", short: "做空", mixed: "方向未一致"};
-const setups = {pullback: "趋势回踩再启动", breakout: "收缩后放量突破"};
+const setups = {pullback: "旧版趋势回踩", breakout: "旧版收缩放量突破", trend_pullback: "十五分钟趋势回踩", channel_breakout: "十五分钟区间突破"};
 const statusLabels = {stopped: "已停止", online: "行情在线", connecting: "连接中", reconnecting: "重连中", error: "监控异常"};
 let snapshot = null;
-let period = "1m";
+let period = "15m";
 let chartKey = "";
 let command = false;
 
@@ -40,8 +40,8 @@ function render() {
   const label = statusLabels[snapshot.status];
   if (status.textContent !== label) status.textContent = label;
   status.dataset.status = snapshot.status;
-  $("#model-config").textContent = snapshot.model_configured ? "模型已配置 · 研究信号" : "模型未配置 · 仅规则分析";
-  $("#start-monitor").textContent = snapshot.running ? "应用频率" : "启动监控";
+  $("#model-config").textContent = snapshot.mode === "observe" ? "观察模式 · 收盘评估" : snapshot.model_configured ? "信号模式 · 仅复核合格候选" : "模型未配置";
+  $("#start-monitor").textContent = snapshot.running ? "应用方式" : "启动监控";
   $("#start-monitor").disabled = command;
   $("#stop-monitor").disabled = command || !snapshot.running;
   $("#market-note").textContent = snapshot.market_note;
@@ -97,14 +97,16 @@ function renderEvidence() {
   }) : []));
   const setupInfo = $("#setup-info");
   setupInfo.hidden = !setup;
-  if (setup) setupInfo.replaceChildren(metric("触发收盘 · 北京", clock(evaluation.closed_at)), metric("量比 · 前二十根", `${setup.volume_ratio.toFixed(2)}×`), metric("此前区间 · USDT", `${price(setup.prior_low)} ~ ${price(setup.prior_high)}`), metric("前一根布林带", setup.squeezed ? "收缩" : "未判定收缩"));
+  if (setup) setupInfo.replaceChildren(metric("15m 收盘 · 北京", clock(evaluation.context["15m"].closed_at)), metric("15m 量比 · 前二十根", `${setup.volume_ratio.toFixed(2)}×`), metric("此前区间 · USDT", `${price(setup.prior_low)} ~ ${price(setup.prior_high)}`), metric("趋势过滤", setup.trend_pass ? "已通过" : "等待方向或强度"));
   const quote = snapshot.quote;
   const info = $("#quote-info");
   info.hidden = !quote;
   if (quote) info.replaceChildren(metric("标记价 · USDT", price(quote.mark)), metric("预计资金费率", `${(100 * quote.funding_rate).toFixed(4)}%`), metric("报价时点 · 北京", clock(quote.ticker_at)), metric("资金费结算 · 北京", clock(quote.funding_at)));
   const review = snapshot.review;
-  $("#review-meta").textContent = review ? `${clock(review.closed_at)} 收盘 · ${review.note}` : "等待策略变化";
-  const result = review?.result;
+  $("#review-meta").textContent = snapshot.mode === "observe" ? "行情观察模式" : review ? `${clock(review.closed_at)} 收盘 · ${review.note}` : "等待策略候选";
+  const candidate = snapshot.mode === "signals" ? review?.candidate : null;
+  $("#review-cost").textContent = candidate?.cost_to_stop === undefined ? "" : `预估成本占止损距离 ${(100 * candidate.cost_to_stop).toFixed(1)}%`;
+  const result = snapshot.mode === "signals" ? review?.result : null;
   $("#review-summary").textContent = result?.analysis ?? "";
   $("#review-counter").textContent = result ? `反证：${result.counter_evidence}` : "";
   $("#review-evidence").textContent = result ? [result.model, result.service_tier, result.evidence_ids.join(" / ")].filter(Boolean).join(" · ") : "";
@@ -119,7 +121,8 @@ function renderSignals() {
     strip.dataset.active = String(active);
     $("#signal-status").textContent = active ? "已确认 · 参考价尚未到期" : "历史信号 · 开仓窗口不可用";
     $("#signal-title").textContent = `${sides[latest.side]} · ${setups[latest.strategy]}`;
-    $("#signal-clock").textContent = `发布 ${clock(latest.published_at)} · 截止 ${clock(latest.expires_at)} 北京时间`;
+    const hold = latest.exit_at == null ? "" : ` · 持仓截止 ${clock(latest.exit_at)}`;
+    $("#signal-clock").textContent = `发布 ${clock(latest.published_at)} · 入场截止 ${clock(latest.expires_at)}${hold} 北京时间`;
     $("#signal-levels").replaceChildren(metric(latest.side === "long" ? "开仓上限 · USDT" : "开仓下限 · USDT", price(latest.entry)), metric("止盈 · USDT", price(latest.take_profit)), metric("止损 · USDT", price(latest.stop_loss)), metric("净收益风险比", `${latest.net_reward_risk.toFixed(2)} : 1`));
   }
   $("#history-table").hidden = !latest;

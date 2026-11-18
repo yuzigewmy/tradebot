@@ -13,8 +13,8 @@ from pydantic import ValidationError
 from .agent import AgentError, model_configured
 from .contracts import TIMEFRAMES
 from .perpetual_market import CHANNELS, HISTORY_LIMIT, OKX_CANDLES_WS, MarketError, closed_windows, history, instrument_tick, now_ms, parse_candle, quote
-from .perpetual_review import revalidation_issue, review_event, review_setup, review_timeout
-from .perpetual_strategy import POLICY, POLICY_ID, detect_setup, exits_touched, priced_candidate, signal_cooldown
+from .perpetual_review import refresh_candidate, review_event, review_setup, review_timeout
+from .perpetual_strategy import PROFILES, detect_setup, detect_trend_setup, exits_touched, priced_candidate, signal_cooldown
 
 MINUTE = TIMEFRAMES["1m"]
 logger = logging.getLogger(__name__)
@@ -42,13 +42,14 @@ class SignalJournal:
 
 
 class PerpetualMonitor:
-    def __init__(self, instrument, market_client, model_client, journal, paper=None):
+    def __init__(self, instrument, market_client, model_client, journal, paper=None, *, profile="v2"):
         self.instrument = instrument
         self.market_client = market_client
         self.model_client = model_client
         self.journal = journal
         self.paper = paper
-        self.mode = "changes"
+        self.profile = profile
+        self.mode = "observe"
         self.task = None
         self.status = "stopped"
         self.market_note = "监控未启动"
@@ -67,6 +68,8 @@ class PerpetualMonitor:
         return self.task is not None and not self.task.done()
 
     def start(self, mode):
+        if mode != self.mode:
+            self.invalidate_review("监控方式已切换")
         self.mode = mode
         if not self.running:
             self.status, self.market_note = "connecting", "连接 OKX 并加载 K 线"
@@ -173,23 +176,22 @@ class PerpetualMonitor:
             return
         initial = self.last_evaluated == 0
         self.last_evaluated = end
-        analysis = detect_setup(windows)
+        analysis = (detect_trend_setup if self.profile == "v2" else detect_setup)(windows)
         setup = analysis["setup"]
-        fingerprint = (analysis["context"]["1h"]["bias"], analysis["context"]["15m"]["bias"], setup["squeezed"], setup["volatile"])
-        previous = self.evaluation
-        self.evaluation = {"closed_at": end, "fingerprint": fingerprint, **analysis}
+        self.evaluation = {"closed_at": end, **analysis}
         self.market_note = "策略已计算最新收盘 K 线"
-        if not (initial or end > self.skip_through):
+        if self.mode == "observe":
             return
-        # An initial or recovered bar can describe the market but cannot open a signal.
-        can_signal = not initial and end > self.skip_through and 0 <= now_ms() - end < MINUTE
-        if self.paper is not None and not (can_signal and setup["strategy"]):
+        if not setup["strategy"] or initial or end <= self.skip_through or not 0 <= now_ms() - end < MINUTE:
             return
-        changed = previous is None or fingerprint != previous["fingerprint"]
-        if not (initial or self.mode == "minute" or end % TIMEFRAMES["15m"] == 0 or changed or setup["strategy"]):
+        _, policy_id, _ = PROFILES[self.profile]
+        last = next((row["closed_at"] for row in self.journal.for_instrument(self.instrument) if row["policy_id"] == policy_id), None)
+        if signal_cooldown(last, end, profile=self.profile):
+            self.review_state = {"closed_at": end, "status": "wait", "note": "上一条信号仍在冷却期", "candidate": None, "result": None}
             return
-        self.latest_job = {"instrument": self.instrument, "closed_at": end, "can_signal": can_signal, "trigger_candle": windows["1m"][-1], **analysis}
-        self.review_state = {"closed_at": end, "status": "queued", "note": "市场变化等待研判", "candidate": None, "result": None}
+        trigger = "15m" if self.profile == "v2" else "1m"
+        self.latest_job = {"instrument": self.instrument, "closed_at": end, "trigger_candle": windows[trigger][-1], **analysis}
+        self.review_state = {"closed_at": end, "status": "queued", "note": "策略候选等待报价", "candidate": None, "result": None}
         self.review_requested.set()
 
     async def review_loop(self):
@@ -207,21 +209,14 @@ class PerpetualMonitor:
     async def review(self, job):
         self.review_state.update(status="reviewing", note="读取盘口、标记价与资金费率")
         end, setup = job["closed_at"], job["setup"]
-        market_quote = (await quote(self.market_client, self.instrument) if self.paper is None else
+        market_quote = (await quote(self.market_client, self.instrument, settled=self.profile == "v2") if self.paper is None else
                         await self.paper.market_quote(self.instrument, end))
         if self.latest_job is not job:
             return
         self.last_quote = market_quote
-        last = self.journal.for_instrument(self.instrument)
-        candidate, reason = None, "策略条件未齐备，继续观察"
-        if setup["strategy"] and not job["can_signal"]:
-            reason = "启动或恢复时的历史收盘，只作观察"
-        elif setup["strategy"] and signal_cooldown(last[0]["closed_at"] if last else None, end):
-            reason = "上一条信号仍在冷却期"
-        elif setup["strategy"]:
-            candidate, reason = priced_candidate(setup, market_quote, self.tick, end, now_ms())
+        candidate, reason = priced_candidate(setup, market_quote, self.tick, end, now_ms(), profile=self.profile)
         self.review_state["candidate"] = candidate
-        if self.paper is not None and candidate is None:
+        if candidate is None:
             self.review_state.update(status="wait", note=reason)
             return
         if not model_configured():
@@ -233,34 +228,36 @@ class PerpetualMonitor:
             return
         event = review_event(job, candidate, market_quote, reason)
         self.review_state["note"] = "模型正按策略 skill 核对证据"
-        result = await review_setup(self.model_client, event, timeout)
+        result = await review_setup(self.model_client, event, timeout, profile=self.profile)
         if self.latest_job is not job:
             return
         self.review_state["result"] = result
         if result["decision"] != "confirm":
             self.review_state.update(status="wait", note=reason or "模型复核：等待")
             return
-        refreshed = (await quote(self.market_client, self.instrument) if self.paper is None else
+        refreshed = (await quote(self.market_client, self.instrument, settled=self.profile == "v2") if self.paper is None else
                      await self.paper.market_quote(self.instrument))
         if self.latest_job is not job:
             return
         self.last_quote = refreshed
-        issue = revalidation_issue(candidate, setup, refreshed, self.forming["1m"], now_ms())
+        candidate, issue = refresh_candidate(candidate, setup, refreshed, self.tick, self.forming["1m"], now_ms(), profile=self.profile)
         if issue:
             self.review_state.update(status="discarded", note=issue)
             return
         signal = {
             **candidate, "instrument": self.instrument, "published_at": now_ms(),
-            "id": f"{self.instrument}:{end}:{POLICY_ID}", "event": event, "trigger_candle": job["trigger_candle"], "verified_quote": refreshed,
+            "id": f"{self.instrument}:{end}:{candidate['policy_id']}", "event": event, "trigger_candle": job["trigger_candle"], "verified_quote": refreshed,
             "model_review": result,
         }
+        self.review_state["candidate"] = candidate
         self.journal.append(signal)
         if self.paper is not None:
             self.paper.enqueue(signal)
         self.review_state.update(status="signal", note="候选通过模型与报价复核")
 
     def signal_is_active(self, signal, now):
-        return (self.status == "online" and self.skip_through < signal["closed_at"] and now < signal["expires_at"]
+        return (self.mode == "signals" and self.status == "online" and self.skip_through < signal["closed_at"] and now < signal["expires_at"]
+                and signal["policy_id"] == PROFILES[self.profile][1]
                 and not exits_touched(signal, self.forming["1m"]))
 
     def view(self):
@@ -268,10 +265,11 @@ class PerpetualMonitor:
         now, active_id = now_ms(), None
         if signals and self.signal_is_active(signals[0], now):
             active_id = signals[0]["id"]
+        policy, policy_id, _ = PROFILES[self.profile]
         return {
             "instrument": self.instrument, "mode": self.mode, "running": self.running,
             "status": self.status, "market_note": self.market_note, "server_time": now,
-            "model_configured": model_configured(), "policy_id": POLICY_ID, "policy_version": POLICY["version"],
+            "model_configured": model_configured(), "policy_id": policy_id, "policy_version": policy["version"],
             "charts": {tf: {"closed": bars[-100:], "current": self.forming[tf]} for tf, bars in self.bars.items()},
             "evaluation": self.evaluation, "quote": self.last_quote, "review": self.review_state,
             "signals": signals, "active_signal_id": active_id,

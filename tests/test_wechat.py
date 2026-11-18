@@ -126,7 +126,7 @@ def test_chat_answers_freely_and_uses_read_only_tool_for_followup(monkeypatch):
             {"type": "message", "content": [{"type": "output_text", "text": text}]}]})
 
     async def scenario():
-        monitor = SimpleNamespace(running=True, status="online", market_note="行情在线", evaluation=None)
+        monitor = SimpleNamespace(running=True, mode="observe", status="online", market_note="行情在线", evaluation=None)
         async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as model:
             assistant = WechatResearch({"BTC-USDT-SWAP": monitor}, model)
             assert "日常问题" in await assistant.answer("介绍一下你自己", conversation)

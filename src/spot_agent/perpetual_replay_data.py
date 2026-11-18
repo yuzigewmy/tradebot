@@ -4,20 +4,28 @@ import asyncio
 from bisect import bisect_right
 from pathlib import Path
 
-from .perpetual_history import DAY, FUNDING_INTERVAL, MARK, MINUTE, SECOND, TRADE, dump, load
+from .perpetual_history import DAY, MARK, MINUTE, SECOND, TRADE, dump, load
+from .perpetual_market import settled_quote
 from .perpetual_scan import candidate_jobs
+from .perpetual_strategy import PROFILES
 
 WARMUP = 161 * 60 * MINUTE
 INITIAL_DELAY = 2 * SECOND
 REFRESH_DELAY = SECOND
 
 
-async def prepare_market(history, instruments, start, end, root):
+def jobs_path(root, instrument, profile):
+    suffix = "" if profile == "v1" else f"-{PROFILES[profile][1]}"
+    return root / f"{instrument}-jobs{suffix}.json"
+
+
+async def prepare_market(history, instruments, start, end, root, profile="v1"):
     warm = start // (60 * MINUTE) * (60 * MINUTE) - WARMUP
     root.mkdir(parents=True, exist_ok=True)
 
     async def instrument_data(instrument):
-        paths = {key: root / f"{instrument}-{key}.json" for key in ("trades", "marks", "funding", "jobs")}
+        paths = {key: root / f"{instrument}-{key}.json" for key in ("trades", "marks", "funding")}
+        candidates = jobs_path(root, instrument, profile)
         if not paths["trades"].exists():
             archives = await history.archives(2, warm, end, "monthly")
             dump(paths["trades"], await history.trade_minutes(instrument, warm, end, archives))
@@ -25,9 +33,9 @@ async def prepare_market(history, instruments, start, end, root):
             dump(paths["marks"], await history.candles(MARK, instrument, MINUTE, start - MINUTE, end))
         if not paths["funding"].exists():
             dump(paths["funding"], await history.settled_funding(instrument, start, end))
-        if not paths["jobs"].exists():
-            dump(paths["jobs"], await asyncio.to_thread(lambda: list(candidate_jobs(instrument, load(paths["trades"]), start, end))))
-        return load(paths["jobs"])
+        if not candidates.exists():
+            dump(candidates, await asyncio.to_thread(lambda: list(candidate_jobs(instrument, load(paths["trades"]), start, end, profile))))
+        return load(candidates)
 
     return [job for items in await asyncio.gather(*(instrument_data(inst) for inst in instruments)) for job in items]
 
@@ -55,13 +63,6 @@ async def prepare_seconds(history, jobs, root, end):
             dump(path, {"trade": trades, "mark": marks})
 
     await asyncio.gather(*(fetch(job) for job in sorted(jobs, key=lambda item: item["closed_at"])))
-
-
-def settled_quote(now, funding):
-    ts = now // FUNDING_INTERVAL * FUNDING_INTERVAL
-    # Availability at the settlement instant is not assumed.
-    previous = ts - FUNDING_INTERVAL if now < ts + MINUTE else ts
-    return {"funding_rate": funding[previous], "funding_at": ts + FUNDING_INTERVAL}
 
 
 class EntryEvidence:

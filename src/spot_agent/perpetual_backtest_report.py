@@ -8,7 +8,7 @@ import json
 
 from .perpetual_history import utc
 from .perpetual_paper import FEE_RATE, INITIAL_CASH, LEVERAGE, RISK_FRACTION, SLIPPAGE, d
-from .perpetual_strategy import POLICY_ID
+from .perpetual_strategy import PROFILES
 
 
 def csv_rows(path, rows, fields):
@@ -18,7 +18,7 @@ def csv_rows(path, rows, fields):
         writer.writerows(rows)
 
 
-def export(root, replay, reviews, counts, config):
+def export(root, replay, reviews, counts, config, *, profile="v1"):
     root.mkdir(parents=True, exist_ok=True)
     account = replay.account
     peak, max_dd, worst, peak_at, dd_peak_at = INITIAL_CASH, d(0), replay.start, replay.start, replay.start
@@ -52,8 +52,9 @@ def export(root, replay, reviews, counts, config):
                 tokens[key] += usage[key]
     times = sorted(row["model_ms"] / 1000 for row in reviews if "model_ms" in row)
     equity = account.equity()
+    policy, policy_id, _ = PROFILES[profile]
     fields = {
-        "start_utc": utc(replay.start), "end_utc_exclusive": utc(replay.end), "policy_id": POLICY_ID,
+        "start_utc": utc(replay.start), "end_utc_exclusive": utc(replay.end), "policy_id": policy_id, "policy_version": policy["version"],
         "initial_equity": INITIAL_CASH, "ending_equity": equity, "free_cash": account.cash,
         "net_pnl": equity - INITIAL_CASH, "return_pct": (equity / INITIAL_CASH - 1) * 100,
         "realized_trade_pnl": realized, "open_positions": open_positions, "closed_trades": len(trades),

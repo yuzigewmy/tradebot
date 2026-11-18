@@ -14,6 +14,7 @@ BARS = {"1m": "1m", "15m": "15m", "1h": "1H"}
 CHANNELS = {f"candle{bar}": timeframe for timeframe, bar in BARS.items()}
 WINDOW = 160
 HISTORY_LIMIT = 240
+FUNDING_INTERVAL = 8 * TIMEFRAMES["1h"]
 
 
 class MarketError(RuntimeError):
@@ -97,17 +98,32 @@ async def history(client, instrument, timeframe):
     return closed, next((row for row, confirmed in reversed(parsed) if not confirmed), None)
 
 
-async def quote(client, instrument):
-    (ticker,), (mark,), (funding,) = await asyncio.gather(
+def settled_quote(now, funding):
+    ts = now // FUNDING_INTERVAL * FUNDING_INTERVAL
+    # Allow the settlement time to pass before treating its rate as known.
+    previous = ts - FUNDING_INTERVAL if now < ts + TIMEFRAMES["1m"] else ts
+    if previous not in funding:
+        raise MarketError("上一期资金费结算尚未取得")
+    return {"funding_rate": funding[previous], "funding_at": ts + FUNDING_INTERVAL}
+
+
+async def quote(client, instrument, *, settled=False):
+    funding_request = (public_data(client, "public/funding-rate-history", instId=instrument, limit=3) if settled
+                       else public_data(client, "public/funding-rate", instId=instrument))
+    (ticker,), (mark,), funding = await asyncio.gather(
         public_data(client, "market/ticker", instId=instrument),
         public_data(client, "public/mark-price", instType="SWAP", instId=instrument),
-        public_data(client, "public/funding-rate", instId=instrument),
+        funding_request,
     )
+    if settled:
+        estimate = settled_quote(now_ms(), {int(row["fundingTime"]): float(row["realizedRate"]) for row in funding})
+    else:
+        rate, = funding
+        estimate = {"funding_rate": float(rate["fundingRate"]), "funding_at": int(rate["fundingTime"])}
     values = {
         "bid": float(ticker["bidPx"]), "ask": float(ticker["askPx"]), "last": float(ticker["last"]), "ticker_at": int(ticker["ts"]),
         "mark": float(mark["markPx"]), "mark_at": int(mark["ts"]),
-        "funding_rate": float(funding["fundingRate"]), "funding_at": int(funding["fundingTime"]),
-        "bid_size": float(ticker["bidSz"]), "ask_size": float(ticker["askSz"]),
+        "bid_size": float(ticker["bidSz"]), "ask_size": float(ticker["askSz"]), **estimate,
     }
     prices = [values[key] for key in ("bid", "ask", "last", "mark")]
     if not all(price > 0 and isfinite(price) for price in prices) or not isfinite(values["funding_rate"]):

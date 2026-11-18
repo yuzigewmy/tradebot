@@ -9,7 +9,8 @@ import pytest
 from spot_agent.contracts import TIMEFRAMES
 from spot_agent.perpetual_market import closed_windows, parse_candle
 from spot_agent.perpetual_monitor import PerpetualMonitor, SignalJournal
-from spot_agent.perpetual_strategy import POLICY_ID, candidate_issue, detect_setup, exits_touched, priced_candidate
+from spot_agent.perpetual_review import refresh_candidate
+from spot_agent.perpetual_strategy import POLICY_ID, TREND_POLICY_ID, candidate_issue, detect_setup, detect_trend_setup, exits_touched, priced_candidate
 
 
 def rows(timeframe, end):
@@ -91,7 +92,7 @@ def test_review_publishes_exact_candidate_or_discards_on_expiry(tmp_path, monkey
     market_price = windows["1m"][-1][4]
     model_candidates = []
 
-    async def market_quote(*_):
+    async def market_quote(*_, **__):
         return {"bid": market_price - 0.01, "ask": market_price + 0.01, "mark": market_price, "last": market_price, "ticker_at": now, "mark_at": now, "funding_rate": 0, "funding_at": end + 3600000}
 
     def model_reply(request):
@@ -120,7 +121,8 @@ def test_review_publishes_exact_candidate_or_discards_on_expiry(tmp_path, monkey
 
     async def evaluate_and_review():
         async with httpx.AsyncClient(transport=httpx.MockTransport(model_reply)) as client:
-            monitor = PerpetualMonitor("BTC-USDT-SWAP", None, client, journal)
+            monitor = PerpetualMonitor("BTC-USDT-SWAP", None, client, journal, profile="v1")
+            monitor.mode = "signals"
             monitor.tick = Decimal("0.01")
             monitor.bars = windows
             monitor.forming = dict.fromkeys(windows)
@@ -140,3 +142,26 @@ def test_review_publishes_exact_candidate_or_discards_on_expiry(tmp_path, monkey
         assert published == [signal]
         assert {key: signal[key] for key in model_candidates[0]} == model_candidates[0]
         assert state["active_signal_id"] == signal["id"]
+
+
+def test_trend_candidate_requires_fresh_fifteen_minute_close_and_cost_budget():
+    end = 1794960000000
+    windows = rising_context(end)
+    windows["15m"][-1][2:6] = [101, 99, 101, 18]
+    evaluation = detect_trend_setup(windows)
+    assert evaluation["setup"]["strategy"] == "channel_breakout"
+    windows["1m"][-1][0] += TIMEFRAMES["1m"]
+    assert detect_trend_setup(windows)["setup"]["strategy"] is None
+
+    tick = Decimal("0.01")
+    prices = {"bid": 100.98, "ask": 101.01, "mark": 101, "last": 101, "ticker_at": end, "mark_at": end,
+              "funding_rate": 0.0, "funding_at": end + 25_200_000}
+    setup = evaluation["setup"]
+    planned, reason = priced_candidate(setup, prices, tick, end, end, profile="v2")
+    assert reason is None and planned["policy_id"] == TREND_POLICY_ID
+    assert planned["net_reward_risk"] >= 2 and 0 < planned["cost_to_stop"] <= 0.25
+    assert planned["exit_at"] == end + 6 * TIMEFRAMES["1h"]
+    refreshed, issue = refresh_candidate(planned, setup, prices | {"ask": 101.02}, tick, None, end + 1000, profile="v2")
+    assert issue is None and refreshed["entry"] == 101.02
+    thin = dict(setup, atr=0.15, stop_anchor=101)
+    assert priced_candidate(thin, prices, tick, end, end, profile="v2")[1] == "预估交易成本超过结构止损距离的四分之一"

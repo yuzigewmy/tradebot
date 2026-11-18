@@ -33,6 +33,7 @@ class Position:
     entry_fee: Decimal
     maintenance_rate: Decimal
     funding: Decimal = ZERO
+    exit_at: int | None = None
 
     @property
     def sign(self):
@@ -73,7 +74,7 @@ class PaperAccount:
         position = Position(instrument, candidate["side"], candidate["strategy"], candidate["closed_at"], ts,
                             contracts, contracts * rules.contract_value, entry, d(candidate["stop_loss"]),
                             d(candidate["take_profit"]), contracts * margin_per_contract, contracts * fee_per_contract,
-                            rules.maintenance_rate)
+                            rules.maintenance_rate, exit_at=candidate.get("exit_at"))
         if position.sign * (position.stop - position.liquidation()) <= 0:
             return "stop_beyond_liquidation"
         self.cash -= position.margin + position.entry_fee
@@ -145,6 +146,8 @@ def tick_exit(position, ticks):
             return "stop_loss", price, ts
         if position.sign * (price - position.target) >= 0:
             return "take_profit", price, ts
+        if position.exit_at is not None and ts >= position.exit_at:
+            return "time_limit", price, ts
 
 
 async def settle_second(account, instrument, trade, mark, at, ticks):
@@ -152,6 +155,8 @@ async def settle_second(account, instrument, trade, mark, at, ticks):
     if mark is not None:
         account.marks[instrument] = d(mark[4])
     trigger = exit_trigger(position, trade, mark)
+    if trade and position.exit_at is not None and trade[0] >= position.exit_at and (trigger is None or trigger[0] != "liquidation"):
+        trigger = "time_limit", d(trade[1]), False
     if trigger is None:
         return
     reason, reference, ambiguous = trigger

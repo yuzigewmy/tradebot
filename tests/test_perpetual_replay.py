@@ -83,3 +83,21 @@ def test_isolated_liquidation_has_priority_when_second_cannot_be_ordered():
         assert account.equity() == Decimal("95.95")
 
     asyncio.run(scenario())
+
+
+def test_time_exit_uses_first_trade_at_deadline_before_a_later_target():
+    async def scenario():
+        account = paper()
+        signal = entry()
+        signal["candidate"]["exit_at"] = 2000
+        assert account.enter("SWAP", signal["candidate"], signal["verified_quote"], 1000) == "entered"
+
+        async def ticks(inst, ts):
+            assert (inst, ts) == ("SWAP", 2000)
+            return [[2100, 1, 101], [2400, 2, 103.1]]
+
+        await process_second(account, {"SWAP": [2000, 101, 103.1, 101, 103.1]}, {}, [], 3000, ticks)
+        closed, = account.trades
+        assert (closed["exit_reason"], closed["trigger_at"], closed["exit_reference"]) == ("time_limit", 2100, 101)
+
+    asyncio.run(scenario())

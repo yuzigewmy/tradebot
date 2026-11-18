@@ -7,13 +7,13 @@
 在项目根目录运行：
 
 ```powershell
-.\.venv\Scripts\python.exe -X utf8 -m spot_agent.perpetual_backtest --start 2026-08-18T08:00:00+08:00 --end 2026-11-18T08:00:00+08:00 --cache data/okx-history --out artifacts/perpetual-backtest-2026-11-18 --stage report
+.\.venv\Scripts\python.exe -X utf8 -m spot_agent.perpetual_backtest --profile v1 --start 2026-08-18T08:00:00+08:00 --end 2026-11-18T08:00:00+08:00 --cache data/okx-history --out artifacts/perpetual-backtest-2026-11-18 --stage report
 ```
 
 原机 `--stage report` 使用当次下载的行情和当次真实模型结果出账，不重复支付模型调用费用。另行下载和研判时使用 `--stage data`、`--stage review`，或省略 `--stage` 一次执行。用 `--review-cache` 可以明确选择过往研判目录。盘口按合约和日期从官方压缩流读取，只缓存候选分钟的有效报价；首次仍需较多网络流量。真实研判需要本地 `.env` 中的网关配置。`data/` 和 `artifacts/` 均由 Git 忽略。
 
 ```powershell
-.\.venv\Scripts\python.exe -X utf8 -m spot_agent.perpetual_paper_live
+.\.venv\Scripts\python.exe -X utf8 -m spot_agent.perpetual_paper_live --profile v1
 ```
 
 实时命令开启一个新的模拟账户，后台按秒处理已收盘的公共成交及标记价。每次会话生成独立的信号和成交账本，重启即创建新会话。账本记录会话结束时仍在持有的仓位。现有网页继续提供行情分析及信号展示。模拟账户无私有 API 和下单入口。

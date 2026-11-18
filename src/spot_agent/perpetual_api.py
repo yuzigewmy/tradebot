@@ -9,7 +9,7 @@ router = APIRouter(prefix="/api/perpetual", tags=["永续合约"])
 
 
 class MonitorOptions(BaseModel):
-    mode: Literal["changes", "minute"] = "changes"
+    mode: Literal["observe", "signals"] = "observe"
 
 
 @router.get("/{instrument}")

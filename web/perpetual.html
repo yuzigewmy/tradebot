@@ -20,7 +20,7 @@
     <div class="page-heading"><div><h1>永续开仓研判</h1><p>OKX · USDT 线性永续</p></div><span id="monitor-status" class="status-tag" role="status">读取监控状态</span></div>
     <form id="monitor-form" class="toolbar">
       <label>合约<select id="instrument"><option value="BTC-USDT-SWAP">BTC / USDT</option><option value="ETH-USDT-SWAP">ETH / USDT</option></select></label>
-      <label>模型研判频率<select id="review-mode"><option value="changes">关键变化</option><option value="minute">每分钟收盘</option></select></label>
+      <label>监控方式<select id="review-mode"><option value="observe">行情观察</option><option value="signals">复核并推送信号</option></select></label>
       <button class="primary" id="start-monitor" type="submit" disabled>启动监控</button>
       <button class="secondary" id="stop-monitor" type="button" disabled>停止监控</button>
       <span id="model-config" class="toolbar-note"></span>
@@ -36,8 +36,8 @@
       <section class="chart-section" aria-label="永续成交 K 线">
         <div class="section-toolbar swap-chart-toolbar">
           <div class="tabs" aria-label="K 线周期">
-            <button type="button" aria-selected="true" data-period="1m">1m</button>
-            <button type="button" aria-selected="false" data-period="15m">15m</button>
+            <button type="button" aria-selected="false" data-period="1m">1m</button>
+            <button type="button" aria-selected="true" data-period="15m">15m</button>
             <button type="button" aria-selected="false" data-period="1h">1H</button>
           </div>
           <span id="chart-time" class="quiet"></span>
@@ -53,8 +53,8 @@
         <dl id="setup-info" class="quote-info" hidden></dl>
         <dl id="quote-info" class="quote-info" hidden></dl>
         <div class="subsection review-section">
-          <h3>模型复核</h3><p id="review-meta" class="quiet">等待策略变化</p>
-          <p id="review-summary"></p><p id="review-counter"></p><p id="review-evidence" class="quiet mono"></p>
+          <h3>模型复核</h3><p id="review-meta" class="quiet">等待策略候选</p>
+          <p id="review-cost" class="quiet"></p><p id="review-summary"></p><p id="review-counter"></p><p id="review-evidence" class="quiet mono"></p>
         </div>
       </aside>
     </div>

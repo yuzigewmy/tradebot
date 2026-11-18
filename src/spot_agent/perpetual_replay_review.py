@@ -1,7 +1,6 @@
 """Run genuine Skill reviews, then reprice at each response's measured arrival."""
 
 import asyncio
-from functools import partial
 import hashlib
 import json
 import math
@@ -15,30 +14,30 @@ from pydantic import ValidationError
 from .agent import AgentError
 from .perpetual_history import SECOND, dump, load
 from .perpetual_replay_data import DayBooks, EntryEvidence, INITIAL_DELAY, REFRESH_DELAY, second_paths
-from .perpetual_review import revalidation_issue, review_event, review_setup, review_timeout
-from .perpetual_strategy import POLICY_ID, priced_candidate
+from .perpetual_review import refresh_candidate, review_event, review_setup, review_timeout
+from .perpetual_strategy import PROFILES, priced_candidate
 
 
-def review_signature():
-    config = [POLICY_ID, *(os.environ.get(f"SPOT_LLM_{suffix}") for suffix in ("BASE_URL", "MODEL", "REASONING_EFFORT", "SERVICE_TIER"))]
+def review_signature(profile="v1"):
+    config = [PROFILES[profile][1], *(os.environ.get(f"SPOT_LLM_{suffix}") for suffix in ("BASE_URL", "MODEL", "REASONING_EFFORT", "SERVICE_TIER"))]
     return hashlib.sha256(json.dumps(config).encode()).hexdigest()[:16]
 
 
-async def review_entry(client, job, evidence, tick, end):
+async def review_entry(client, job, evidence, tick, end, *, profile="v1"):
     closed_at = job["closed_at"]
     initial_at = closed_at + INITIAL_DELAY
     trace = {"instrument": job["instrument"], "closed_at": closed_at, "initial_at": initial_at}
     initial = evidence.quote(initial_at)
     if initial is None:
         return trace | {"status": "missing_initial_quote"}
-    candidate, reason = priced_candidate(job["setup"], initial, tick, closed_at, initial_at)
+    candidate, reason = priced_candidate(job["setup"], initial, tick, closed_at, initial_at, profile=profile)
     if candidate is None:
         return trace | {"status": "price_rejected", "reason": reason, "initial_quote": initial}
     event = review_event(job, candidate, initial, None)
     trace.update(candidate=candidate, initial_quote=initial, requested_at_utc_ms=time.time_ns() // 1_000_000)
     started = time.monotonic()
     try:
-        result = await review_setup(client, event, review_timeout(candidate, initial_at))
+        result = await review_setup(client, event, review_timeout(candidate, initial_at), profile=profile)
     except httpx.HTTPStatusError as error:
         code = error.response.status_code
         if code in (400, 401, 403, 404):
@@ -58,17 +57,17 @@ async def review_entry(client, job, evidence, tick, end):
     if refreshed is None:
         return trace | {"status": "missing_refresh_quote", "verified_at": ready}
     trace.update(verified_at=ready, verified_quote=refreshed)
-    issue = revalidation_issue(candidate, job["setup"], refreshed, evidence.forming(ready), ready)
+    final_candidate, issue = refresh_candidate(candidate, job["setup"], refreshed, tick, evidence.forming(ready), ready, profile=profile)
     if issue:
         return trace | {"status": "revalidation_rejected", "reason": issue}
-    return trace | {"status": "passed"}
+    return trace | {"status": "passed", "candidate": final_candidate, "initial_candidate": candidate}
 
 
 def trace_path(root, job):
     return root / f"{job['instrument']}-{job['closed_at']}.json"
 
 
-async def run_reviews(client, jobs, books, seconds, funding, ticks, root, end, workers, follow=False):
+async def run_reviews(client, jobs, books, seconds, funding, ticks, root, end, workers, follow=False, *, profile="v1"):
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
     books = DayBooks(books)
@@ -81,7 +80,7 @@ async def run_reviews(client, jobs, books, seconds, funding, ticks, root, end, w
         while (task := await queue.get()) is not None:
             job, evidence = task
             inst = job["instrument"]
-            result = await review_entry(client, job, evidence, ticks[inst], end)
+            result = await review_entry(client, job, evidence, ticks[inst], end, profile=profile)
             dump(trace_path(root, job), result)
             completed += 1
             if completed % 50 == 0:

@@ -9,13 +9,13 @@ from .perpetual_replay_data import second_paths
 from .perpetual_strategy import signal_cooldown
 
 
-def publish_replay_signals(reviews, latest=None):
+def publish_replay_signals(reviews, latest=None, *, profile="v1"):
     if latest is None:
         latest = {}
     signals, signal_counts = [], Counter()
     for review in sorted(reviews, key=lambda row: (row["closed_at"], row["instrument"])):
         at, inst = review["closed_at"], review["instrument"]
-        if signal_cooldown(latest.get(inst), at):
+        if signal_cooldown(latest.get(inst), at, profile=profile):
             signal_counts["cooldown"] += 1
         elif review["status"] == "passed":
             signals.append(review)
@@ -67,7 +67,12 @@ class Replay:
                 if t in self.funding[inst]:
                     self.account.fund(inst, self.funding[inst][t], self.marks[inst][t - MINUTE][4], t)
             entries = by_minute[t]
-            coarse_hit = {inst for inst in active if exit_trigger(self.account.positions[inst], self.trades[inst][t], self.marks[inst][t])}
+            coarse_hit = set()
+            for inst in active:
+                position = self.account.positions[inst]
+                if (position.exit_at is not None and position.exit_at < t + MINUTE
+                        or exit_trigger(position, self.trades[inst][t], self.marks[inst][t])):
+                    coarse_hit.add(inst)
             if entries or coarse_hit:
                 symbols = sorted(active | {row["instrument"] for row in entries})
                 series = dict(zip(symbols, await asyncio.gather(*(self._seconds(inst, t) for inst in symbols)), strict=True))
