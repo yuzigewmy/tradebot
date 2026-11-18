@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from .agent import AgentError, response_text, responses_config
-from .perpetual_strategy import POLICY, POLICY_ID, SKILL
+from .perpetual_strategy import POLICY, POLICY_ID, SKILL, candidate_issue, exits_touched
 
 
 class SetupReview(BaseModel):
@@ -15,6 +15,23 @@ class SetupReview(BaseModel):
     analysis: str = Field(min_length=1, max_length=1300)
     counter_evidence: str = Field(min_length=1, max_length=650)
     evidence_ids: list[Literal["context", "setup", "execution"]] = Field(min_length=1, max_length=3)
+
+
+def review_event(job, candidate, quote, reason):
+    event = {key: job[key] for key in ("instrument", "closed_at", "context", "setup")}
+    event["execution"] = {"candidate": candidate, "quote": quote, "observation_reason": reason}
+    return event
+
+
+def review_timeout(candidate, now):
+    return min(40, (candidate["expires_at"] - now) / 1000) if candidate else 40
+
+
+def revalidation_issue(candidate, setup, quote, forming, now):
+    issue = candidate_issue(candidate, setup, quote, now)
+    if not issue and exits_touched(candidate, forming):
+        return "复核期间成交已触及退出价位"
+    return issue
 
 
 async def review_setup(client, event, timeout):
@@ -36,4 +53,4 @@ async def review_setup(client, event, timeout):
         raise AgentError("模型确认未引用完整的开仓及报价证据")
     if re.search(r"\d|[%％]", answer.analysis + answer.counter_evidence):
         raise AgentError("模型解释含未核验的数值")
-    return answer.model_dump() | {"model": result["model"], "service_tier": result.get("service_tier")}
+    return answer.model_dump() | {"model": result["model"], "service_tier": result.get("service_tier"), "usage": result.get("usage")}

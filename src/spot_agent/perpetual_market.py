@@ -1,5 +1,6 @@
 """OKX trade candles with exchange confirmation, and public reference prices."""
 
+from dataclasses import dataclass
 from decimal import Decimal
 from math import isfinite
 import asyncio
@@ -17,6 +18,17 @@ HISTORY_LIMIT = 240
 
 class MarketError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class InstrumentRules:
+    tick: Decimal
+    contract_value: Decimal
+    lot: Decimal
+    min_size: Decimal
+    max_tier_size: Decimal
+    maintenance_rate: Decimal
+    max_leverage: Decimal
 
 
 def now_ms():
@@ -53,14 +65,27 @@ async def public_data(client, path, **params):
     return body["data"]
 
 
-async def instrument_tick(client, instrument):
+async def public_contract(client, instrument):
     contract, = await public_data(client, "public/instruments", instType="SWAP", instId=instrument)
     if (contract["ctType"], contract["settleCcy"], contract["state"]) != ("linear", "USDT", "live"):
         raise MarketError("仅支持交易中的线性 USDT 永续")
+    return contract
+
+
+async def instrument_tick(client, instrument):
+    contract = await public_contract(client, instrument)
     tick = Decimal(contract["tickSz"])
     if not tick.is_finite() or tick <= 0:
         raise MarketError("OKX 合约报价精度无效")
     return tick
+
+
+async def instrument_rules(client, instrument):
+    contract = await public_contract(client, instrument)
+    tiers = await public_data(client, "public/position-tiers", instType="SWAP", tdMode="isolated", instFamily=contract["instFamily"])
+    first = next(tier for tier in tiers if tier["tier"] == "1")
+    return InstrumentRules(*map(Decimal, (contract["tickSz"], contract["ctVal"], contract["lotSz"], contract["minSz"],
+                                         first["maxSz"], first["mmr"], first["maxLever"])))
 
 
 async def history(client, instrument, timeframe):
@@ -82,6 +107,7 @@ async def quote(client, instrument):
         "bid": float(ticker["bidPx"]), "ask": float(ticker["askPx"]), "last": float(ticker["last"]), "ticker_at": int(ticker["ts"]),
         "mark": float(mark["markPx"]), "mark_at": int(mark["ts"]),
         "funding_rate": float(funding["fundingRate"]), "funding_at": int(funding["fundingTime"]),
+        "bid_size": float(ticker["bidSz"]), "ask_size": float(ticker["askSz"]),
     }
     prices = [values[key] for key in ("bid", "ask", "last", "mark")]
     if not all(price > 0 and isfinite(price) for price in prices) or not isfinite(values["funding_rate"]):

@@ -169,3 +169,7 @@ def exits_touched(candidate, candle):
         return False
     lower, upper = sorted((candidate["stop_loss"], candidate["take_profit"]))
     return candle[3] <= lower or candle[2] >= upper
+
+
+def signal_cooldown(previous, closed_at):
+    return previous is not None and closed_at - previous < POLICY["signal_cooldown_minutes"] * TIMEFRAMES["1m"]
