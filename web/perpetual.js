@@ -203,7 +203,7 @@ function selectPeriod(value) {
 function syncInstrumentControls() {
   const eth = $("#instrument").value === "ETH-USDT-SWAP";
   const option = $("#strategy-select").querySelector(`[value="${compressionStrategy}"]`);
-  option.disabled = option.hidden = !eth;
+  option.disabled = !eth;
   $('[data-period="30m"]').hidden = !eth;
   if (!eth && period === "30m") selectPeriod("15m");
 }
