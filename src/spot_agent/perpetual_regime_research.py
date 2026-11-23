@@ -10,9 +10,11 @@ from pathlib import Path
 import aiohttp
 
 from .perpetual_backtest_report import csv_rows
+from .perpetual_btc import BTC_INSTRUMENT, BTC_POLICY_ID, BTC_STRATEGY, btc_signals
 from .perpetual_history import MINUTE, OkxHistory, dump, load, utc
 from .perpetual_regime import BRACKETS, PHASE_TWO, SLOW_BRACKETS, SLOW_TRENDS, STRATEGY_SETS, Brackets, Setup
 from .perpetual_regime_replay import INSTRUMENTS, Market, Tape, replay
+from .perpetual_regime_terms import FIXED_COOLDOWN_MINUTES, FIXED_FUNDING_BUFFER
 
 
 @dataclass(frozen=True)
@@ -283,14 +285,40 @@ async def validate(market, out, cache, exact, show_actual, books_dir, exit_books
         dump(out/"summary.json",tested)
 
 
+async def validate_btc(market, options):
+    execution = {
+        "books": read_books(options.books) if options.books else None,
+        "exit_books": read_books(options.exit_books) if options.exit_books else None,
+        "exit_delay_ms": options.exit_delay_ms,
+    }
+    signals = btc_signals(market)
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20), trust_env=True) as client:
+        tape = Tape(OkxHistory(client, options.cache), verify_all=options.exact == "all") if options.exact != "none" else None
+        settings = dict(tape=tape, maximum_positions=1, funding_buffer=FIXED_FUNDING_BUFFER,
+                        cooldown=FIXED_COOLDOWN_MINUTES, **execution)
+        result, trades, equity = await replay(market, signals, **settings)
+        report = {"strategy": BTC_STRATEGY, "policy_id": BTC_POLICY_ID, "candidates": len(signals), **result}
+        if options.actual_funding:
+            actual, _, _ = await replay(market, signals, funding_charge=None, **settings)
+            report["actual_funding"] = actual
+    dump(options.out / "summary.json", report)
+    if trades:
+        fields = list(trades[0])
+        csv_rows(options.out / "trades.csv", ([trade[key] for key in fields] for trade in trades), fields)
+    csv_rows(options.out / "equity.csv", ((utc(market.start + i * MINUTE), float(value)) for i, value in enumerate(equity)), ["utc", "equity"])
+    print(f"{BTC_STRATEGY} {result['return_pct']:+.2f}% | {result['trades']} trades | MDD {result['max_drawdown_pct']:.2f}%", flush=True)
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("stage",choices=("choose","choose-phase-two","choose-slow","historical-search","choose-regimes","validate"))
+    parser.add_argument("stage",choices=("choose","choose-phase-two","choose-slow","historical-search","choose-regimes","validate","validate-btc"))
     parser.add_argument("--market",type=Path,default=Path("data/perpetual-regime-market"))
     parser.add_argument("--cache",type=Path,default=Path("data/okx-history"))
     parser.add_argument("--out",type=Path,default=Path("artifacts/perpetual-regime-2026-11-23"))
     parser.add_argument("--exact",choices=("none","ambiguous","all"),default="none")
     parser.add_argument("--actual-funding",action="store_true")
+    parser.add_argument("--start", type=date, default=date("2026-08-23"))
+    parser.add_argument("--end", type=date, default=date("2026-11-23"))
     parser.add_argument("--books", type=Path)
     parser.add_argument("--exit-books", type=Path)
     parser.add_argument("--exit-delay-ms", type=int, default=0)
@@ -306,6 +334,9 @@ def main():
         m=Market(a.market/"calibration",rules,date("2026-05-23"),split)
         choose_strategy = {"choose": lambda:choose(m,a.out), "choose-phase-two": lambda:choose_phase_two(m,a.out,a.first), "choose-slow": lambda:choose_slow(m,a.out)}
         asyncio.run(choose_strategy[a.stage]())
+    elif a.stage == "validate-btc":
+        market = Market(a.market, rules, a.start, a.end, instruments=(BTC_INSTRUMENT,))
+        asyncio.run(validate_btc(market, a))
     elif a.stage == "choose-regimes":
         latest = Market(a.market / "calibration", rules, date("2026-05-23"), split)
         older = Market(a.market / "untouched", rules, date("2026-02-23"), latest.start)

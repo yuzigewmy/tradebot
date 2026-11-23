@@ -17,14 +17,15 @@ INSTRUMENTS = ("BTC-USDT-SWAP", "ETH-USDT-SWAP")
 
 
 class Market:
-    def __init__(self, folder, rules_file, start, end):
+    def __init__(self, folder, rules_file, start, end, *, instruments=INSTRUMENTS):
         raw_rules = load(rules_file)
-        self.rules = {i: InstrumentRules(**{k: d(v) for k, v in r.items()}) for i, r in raw_rules.items()}
+        self.rules = {instrument: InstrumentRules(**{key: d(value) for key, value in raw_rules[instrument].items()})
+                      for instrument in instruments}
         start_with_mark = start - MINUTE
         self.start, self.end = start, end
         self.trade, self.mark, self.funding, self.features = {}, {}, {}, {}
         expected = np.arange(start_with_mark, end, MINUTE)
-        for inst in INSTRUMENTS:
+        for inst in instruments:
             trades = np.array(load(folder / f"{inst}-trades.json"), dtype=float)
             marks = np.array(load(folder / f"{inst}-marks.json"), dtype=float)
             self.features[inst] = InstrumentFeatures(trades)
@@ -226,8 +227,8 @@ async def replay(market, signals, *, tape=None, funding_charge=FUNDING_CHARGE, m
             orders[market.index(r.at + MINUTE)].append(r)
     exits = {}
     by_minute = defaultdict(dict)
-    for inst in INSTRUMENTS:
-        for at, rate in market.funding[inst].items():
+    for inst, rates in market.funding.items():
+        for at, rate in rates.items():
             if start <= at < end:
                 by_minute[market.index(at)][inst] = rate
     timetable = sorted(orders.keys() | by_minute.keys() | {ceiling})
