@@ -9,12 +9,12 @@ import httpx
 
 from .binance_execution import BinanceExecutor, TradeLedger, account_lock
 from .binance_market import BinanceMarket
-from .binance_sdk import BinanceFutures
+from .binance_sdk import MARGIN_PERCENT, BinanceFutures
 from .perpetual_btc import BTC_INSTRUMENT, BTC_STRATEGY
 from .perpetual_compression import COMPRESSION_INSTRUMENT, COMPRESSION_STRATEGY
 from .perpetual_market import HISTORY_LIMIT, MarketError
 from .perpetual_monitor import PerpetualMonitor, SignalJournal
-from .perpetual_regime_terms import fixed_signal_candidate
+from .perpetual_regime_terms import LEVERAGE, fixed_signal_candidate
 
 STRATEGIES = {BTC_INSTRUMENT: BTC_STRATEGY, COMPRESSION_INSTRUMENT: COMPRESSION_STRATEGY}
 
@@ -73,7 +73,10 @@ class BinanceMonitor(PerpetualMonitor):
         return await self.market.candles(self.instrument, timeframe, await self.market.clock() - 1200)
 
     def fixed_candidate(self, policy, setup, market_quote, published_at):
-        return fixed_signal_candidate(policy, setup, market_quote, self.rules, published_at, quantity_for=self.rules.quantity)
+        candidate, issue = fixed_signal_candidate(policy, setup, market_quote, self.rules, published_at, binance=True)
+        if candidate is None:
+            return None, issue
+        return candidate | {"margin_percent": MARGIN_PERCENT, "leverage": int(LEVERAGE)}, None
 
     def previous_outcome(self, previous):
         if self.ledger is not None:
@@ -90,7 +93,7 @@ class BinanceMonitor(PerpetualMonitor):
 
     def view(self):
         result = super().view()
-        result.update(execution_mode=self.settings.mode)
+        result.update(execution_mode=self.settings.mode, margin_percent=MARGIN_PERCENT, leverage=int(LEVERAGE))
         for signal in result["signals"]:
             signal["outcome"] = (self.ledger.status(signal["id"]) if self.ledger is not None else {"status": "public_signal"})
         return result

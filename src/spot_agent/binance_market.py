@@ -20,10 +20,10 @@ class BinanceRules:
     maximum: Decimal
     min_notional: Decimal
 
-    def quantity(self, price, notional):
-        steps = (notional / price / self.step).to_integral_value(rounding=ROUND_FLOOR)
+    def quantity(self, limit_price, notional, *, sizing_price):
+        steps = (notional / sizing_price / self.step).to_integral_value(rounding=ROUND_FLOOR)
         quantity = steps * self.step
-        if self.minimum <= quantity <= self.maximum and quantity * price >= self.min_notional:
+        if self.minimum <= quantity <= self.maximum and quantity * limit_price >= self.min_notional:
             return quantity
 
 

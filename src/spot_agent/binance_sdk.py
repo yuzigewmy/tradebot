@@ -15,7 +15,9 @@ from pydantic import TypeAdapter
 from pydantic_core import ValidationError
 
 from .binance_market import DEMO_URL, LIVE_URL
-from .perpetual_regime_terms import LEVERAGE, MARGIN
+from .perpetual_regime_terms import LEVERAGE
+
+MARGIN_PERCENT = 25
 
 
 @dataclass(frozen=True)
@@ -114,6 +116,12 @@ class BinanceFutures:
         if (self.position(symbol) or self.request("current_all_open_orders", symbol=symbol)
                 or self.request("current_all_algo_open_orders", symbol=symbol)):
             raise BinanceError(f"{symbol} 存在非本执行器管理的仓位或订单")
+        balance = self.balance()
+        margin_budget = Decimal(balance["balance"]) * MARGIN_PERCENT / 100
+        if margin_budget <= 0:
+            raise BinanceError("币安 USDT 钱包余额不足")
+        if Decimal(balance["availableBalance"]) < margin_budget:
+            raise BinanceError(f"可用 USDT 余额不足，无法覆盖 {margin_budget:f} USDT 保证金预算")
         config, = self.request("symbol_configuration", symbol=symbol)
         if config["isAutoAddMargin"]:
             raise BinanceError(f"{symbol} 需在币安关闭自动追加保证金")
@@ -122,10 +130,9 @@ class BinanceFutures:
                          missing=(-4046,))
         if config["leverage"] != int(LEVERAGE):
             config = self.request("change_initial_leverage", symbol=symbol, leverage=int(LEVERAGE))
-        if Decimal(config["maxNotionalValue"]) < MARGIN * LEVERAGE:
+        if Decimal(config["maxNotionalValue"]) < margin_budget * LEVERAGE:
             raise BinanceError(f"{symbol} 杠杆档位不足以覆盖计划名义额")
-        if Decimal(self.balance()["availableBalance"]) < MARGIN:
-            raise BinanceError("可用 USDT 余额低于 250")
+        return margin_budget
 
     def enter(self, symbol, long, price, quantity, client_id, window):
         return self.request("new_order", symbol=symbol, side=enums.NewOrderSideEnum("BUY" if long else "SELL"),

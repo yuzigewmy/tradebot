@@ -2,8 +2,10 @@ import asyncio
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
 from spot_agent.binance_market import BinanceMarket, BinanceRules
-from spot_agent.binance_sdk import BinanceFutures, BinanceSettings
+from spot_agent.binance_sdk import BinanceError, BinanceFutures, BinanceSettings
 
 D = Decimal
 
@@ -22,10 +24,55 @@ def test_binance_warmup_does_not_promote_the_forming_kline():
     assert forming[0] == 180_000
 
 
-def test_binance_sizes_to_exchange_step_and_min_notional():
+def test_binance_sizes_to_exchange_step_and_checks_min_notional_at_limit():
     rules = BinanceRules(D("0.1"), D("0.001"), D("0.001"), D("10"), D("100"))
-    assert rules.quantity(D("75123.4"), D("7500")) == D("0.099")
-    assert rules.quantity(D("75123.4"), D("120")) is None
+    assert rules.quantity(D("61499.9"), D("128.425925850"), sizing_price=D("61500")) == D("0.002")
+    assert rules.quantity(D("49999"), D("128.425925850"), sizing_price=D("50000")) is None
+
+
+def test_sdk_reads_usdt_wallet_balance_when_preparing_each_order(monkeypatch):
+    sdk = BinanceFutures(BinanceSettings("demo", "test-key", "test-secret"))
+    balances = iter([
+        {"balance": "17.12345678", "availableBalance": "10"},
+        {"balance": "40", "availableBalance": "30"},
+        {"balance": "40", "availableBalance": "9.99"},
+    ])
+
+    def response(method, **params):
+        if method == "futures_account_balance_v3":
+            return [{"asset": "USDC", "balance": "1000"}, {"asset": "USDT", **next(balances)}]
+        if method == "symbol_configuration":
+            return [{"marginType": "ISOLATED", "leverage": 30, "isAutoAddMargin": False, "maxNotionalValue": "7500"}]
+        assert method in {"position_information_v3", "current_all_open_orders", "current_all_algo_open_orders"}
+        return []
+
+    monkeypatch.setattr(sdk, "request", response)
+    assert sdk.prepare("BTCUSDT") == D("4.280864195")
+    assert sdk.prepare("ETHUSDT") == D("10")
+    with pytest.raises(BinanceError, match="可用 USDT 余额不足"):
+        sdk.prepare("ETHUSDT")
+
+
+def test_binance_signal_does_not_filter_depth_using_the_paper_budget(tmp_path):
+    from spot_agent.binance_monitor import BinanceMonitor
+    from spot_agent.perpetual_btc import BTC_POLICY
+    from spot_agent.perpetual_monitor import SignalJournal
+    from spot_agent.wechat_research import signal_message
+
+    instrument = "BTC-USDT-SWAP"
+    closed_at = 1795419300000
+    now = closed_at + 61_000
+    monitor = BinanceMonitor(instrument, BinanceMarket(None, "demo"), None, SignalJournal(tmp_path / "signals.jsonl"),
+                             BinanceSettings("demo"), BinanceRules(D(".1"), D(".001"), D(".001"), D("10"), D("100")))
+    quote = {"ask": 61500, "bid": 61499.9, "mark": 61500, "last": 61500, "ask_size": 0.002,
+             "ticker_at": now, "funding_at": now + 600_000}
+    signal, issue = monitor.fixed_candidate(BTC_POLICY, {"closed_at": closed_at, "side": "long", "atr": 100}, quote, now)
+
+    assert issue is None
+    assert signal["margin_percent"] == 25
+    assert "quantity" not in signal and "margin_budget" not in signal
+    published = signal | {"instrument": instrument, "exchange": "Binance", "execution_mode": "demo"}
+    assert "钱包余额的 25% × 30 倍" in signal_message(published)
 
 
 def test_sdk_sends_entry_and_protection_with_distinct_client_ids(monkeypatch):
@@ -68,10 +115,7 @@ def test_sdk_sends_entry_and_protection_with_distinct_client_ids(monkeypatch):
 def test_trade_recovers_partial_fill_then_cancels_sibling_on_settlement(tmp_path, monkeypatch):
     import sqlite3
 
-    import pytest
-
     from spot_agent.binance_execution import BinanceTrade, TradeLedger
-    from spot_agent.binance_sdk import BinanceError
 
     now = 1795419280000
     signal = {"id": "BTC:case-1", "instrument": "BTC-USDT-SWAP", "trade_agent_id": "trade-example", "side": "long",
@@ -85,8 +129,10 @@ def test_trade_recovers_partial_fill_then_cancels_sibling_on_settlement(tmp_path
     class Exchange:
         async def call(self, action, *args):
             calls.append(action)
+            if action == "prepare":
+                return D("100")
             if action == "enter":
-                assert args[:4] == ("BTCUSDT", True, D("80000.1"), D("0.093"))
+                assert args[:4] == ("BTCUSDT", True, D("80000.1"), D("0.037"))
                 raise BinanceError("network", unknown=True)
             if action == "order":
                 return filled
@@ -105,7 +151,7 @@ def test_trade_recovers_partial_fill_then_cancels_sibling_on_settlement(tmp_path
                 one = {"qty": ".03", "time": now, "commission": ".05", "commissionAsset": "USDT"}
                 return [one | {"orderId": 42, "side": "BUY", "price": "79999.9", "realizedPnl": "0"},
                         one | {"orderId": 44, "side": "SELL", "price": "81999.9", "realizedPnl": "60"}]
-            assert action == "prepare"
+            pytest.fail(f"Unexpected SDK action {action}")
 
     class Market:
         def now(self):
@@ -136,7 +182,7 @@ def test_trade_recovers_partial_fill_then_cancels_sibling_on_settlement(tmp_path
             await worker.step()
             assert calls.count("enter") == 1
             assert len(algos) == 2
-            assert ledger.status(signal["id"])["status"] == "protected"
+            assert ledger.status(signal["id"]) == {"status": "protected", "margin_budget": 100.0}
             assert [n.kind for n in notices] == ["protected"]
             position = None
             algos[worker.protections["target"]] = {"algoStatus": "FINISHED", "actualOrderId": "44"}
@@ -147,6 +193,7 @@ def test_trade_recovers_partial_fill_then_cancels_sibling_on_settlement(tmp_path
             assert outcome["status"] == "binance_closed" and outcome["pnl_usdt"] == 59.90
             assert [(n.kind, n.text.splitlines()[1]) for n in notices] == [("protected", "成功"), ("closed", "成功")]
             assert "止盈触发" in notices[-1].text and not list(ledger.pending())
+            assert "保证金预算 100 USDT" in notices[0].text
 
     asyncio.run(full_trade())
 
@@ -155,7 +202,6 @@ def test_trade_flattens_only_open_size_when_protection_is_rejected(tmp_path):
     import sqlite3
 
     from spot_agent.binance_execution import BinanceTrade, TradeLedger
-    from spot_agent.binance_sdk import BinanceError
 
     now = 1795419280000
     signal = {"id": "ETH:case-1", "instrument": "ETH-USDT-SWAP", "trade_agent_id": "trade-eth", "side": "short",

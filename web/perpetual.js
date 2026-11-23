@@ -55,7 +55,8 @@ function render() {
   const mode = snapshot.execution_mode;
   const marketLabel = {quotes: "币安行情", demo: "币安 Demo", live: "币安实盘"}[mode] ?? "OKX";
   const canTrade = mode === "demo" || mode === "live";
-  const signalMode = binance ? `${marketLabel} · ${canTrade ? "自动下单 · 250 USDT 逐仓 · 30 倍" : "信号"}`
+  const sizing = `钱包余额 ${snapshot.margin_percent}% 逐仓 · ${snapshot.leverage} 倍`;
+  const signalMode = binance ? `${marketLabel} · ${canTrade ? `自动下单 · ${sizing}` : "信号"}`
     : fixedSignal ? "模拟信号 · 250 USDT 逐仓 · 30 倍"
     : snapshot.model_configured ? "信号模式 · 仅复核合格候选" : "模型未配置";
   $("#exchange-label").textContent = `${marketLabel} · USDT 线性永续`;
@@ -173,7 +174,13 @@ function renderSignals() {
     $("#signal-status").textContent = active ? "已确认 · 参考价尚未到期" : "历史信号 · 开仓窗口不可用";
     $("#signal-title").textContent = `${sides[latest.side]} · ${setups[latest.strategy]}`;
     const hold = latest.exit_at == null ? "" : ` · 持仓截止 ${clock(latest.exit_at)}`;
-    const size = latest.margin_budget === undefined ? "" : ` · 逐仓 ${latest.margin_budget} USDT × ${latest.leverage} 倍`;
+    let size = "";
+    if (latest.margin_percent !== undefined) {
+      size = ` · 逐仓钱包余额的 ${latest.margin_percent}% × ${latest.leverage} 倍`;
+      if (latest.outcome.margin_budget !== undefined) size += ` · 保证金预算 ${price(latest.outcome.margin_budget)} USDT`;
+    } else if (latest.margin_budget !== undefined) {
+      size = ` · 逐仓 ${latest.margin_budget} USDT × ${latest.leverage} 倍`;
+    }
     $("#signal-clock").textContent = `发布 ${clock(latest.published_at)} · 入场截止 ${clock(latest.expires_at)}${hold} 北京时间${size}`;
     $("#signal-levels").replaceChildren(metric(latest.side === "long" ? "开仓上限 · USDT" : "开仓下限 · USDT", price(latest.entry)), metric("止盈 · USDT", price(latest.take_profit)), metric("止损 · USDT", price(latest.stop_loss)), metric("净收益风险比", `${latest.net_reward_risk.toFixed(2)} : 1`));
   }

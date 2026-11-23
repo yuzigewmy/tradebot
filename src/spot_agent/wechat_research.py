@@ -39,7 +39,10 @@ def signal_message(signal):
     exchange = signal.get("exchange", "OKX")
     if exchange == "Binance":
         mode = {"quotes": "行情", "demo": "Demo", "live": "实盘"}[signal["execution_mode"]]
-        position = f"\n计划逐仓　{signal['margin_budget']} USDT × {signal['leverage']} 倍"
+        if "margin_percent" in signal:
+            position = f"\n计划逐仓　钱包余额的 {signal['margin_percent']}% × {signal['leverage']} 倍"
+        else:
+            position = f"\n计划逐仓　{signal['margin_budget']} USDT × {signal['leverage']} 倍"
         exchange = f"币安 {mode}"
     return (f"【{exchange} 永续开仓信号】\n{signal['instrument']} · {SIDES[signal['side']]}\n"
             f"策略　{STRATEGIES[signal['strategy']]}\n"

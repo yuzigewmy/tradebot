@@ -52,14 +52,14 @@ ENTRY_ISSUES = {
 }
 
 
-def fixed_signal_candidate(policy, setup, market_quote, rules, now, *, quantity_for=None):
+def fixed_signal_candidate(policy, setup, market_quote, rules, now, *, binance=False):
     closed_at = setup["closed_at"]
     entry_at = closed_at + MINUTE
     expires_at = entry_at + FIXED_ENTRY_WINDOW
     # The outcome journal opens simulated positions on whole seconds.
     if not entry_at <= market_quote["ticker_at"] <= now or (now + SECOND - 1) // SECOND * SECOND >= expires_at:
         return None, "未取得入场时间窗内的新盘口"
-    exit_at = holding_deadline(entry_at, policy.brackets.hold, 0 if quantity_for else FIXED_FUNDING_BUFFER)
+    exit_at = holding_deadline(entry_at, policy.brackets.hold, 0 if binance else FIXED_FUNDING_BUFFER)
     exit_at = min(exit_at, market_quote["funding_at"] - FIXED_FUNDING_BUFFER * MINUTE)
     if now >= exit_at:
         return None, "距资金费结算不足两分钟"
@@ -82,16 +82,10 @@ def fixed_signal_candidate(policy, setup, market_quote, rules, now, *, quantity_
         "policy_id": policy.policy_id, "policy_version": policy.version,
         "entry_reference": f"best_{entry_side}", "exit_reference": "last_trade",
     }
-    if quantity_for is not None:
-        size_price = max(entry, d(market_quote["ask"]), d(market_quote["mark"]))
-        quantity = quantity_for(size_price, MARGIN * LEVERAGE)
-        if quantity is None:
-            return None, "计划仓位不符合币安数量或名义额限制"
-        if d(market_quote[f"{entry_side}_size"]) < quantity:
-            return None, ENTRY_ISSUES["insufficient_depth"]
+    if binance:
         if not min(stop, target) < d(market_quote["last"]) < max(stop, target):
             return None, "币安最新成交价已越过退出价位"
-        return candidate | {"margin_budget": int(MARGIN), "leverage": int(LEVERAGE), "quantity": float(quantity)}, None
+        return candidate, None
     account = PaperAccount({policy.instrument: rules}, cash=CAPITAL, leverage=LEVERAGE,
                            fixed_margin=MARGIN, funding_charge=FUNDING_CHARGE)
     state = account.enter(policy.instrument, candidate, market_quote | {entry_side: entry}, now)

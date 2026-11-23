@@ -16,7 +16,7 @@ from .contracts import TIMEFRAMES
 from .binance_sdk import BinanceError, BinanceFutures
 from .perpetual_market import MarketError, now_ms
 from .perpetual_paper import d
-from .perpetual_regime_terms import LEVERAGE, MARGIN
+from .perpetual_regime_terms import LEVERAGE
 from .perpetual_trade import REVIEW_ERRORS, TradeAgent, TradeNotice, time_label
 
 log = logging.getLogger(__name__)
@@ -62,9 +62,12 @@ class TradeLedger:
         if row is None:
             return {"status": "entry_skipped", "verdict": "失败"}
         state, outcome = row
-        if outcome:
-            return json.loads(outcome)
         progress = json.loads(state)
+        sizing = {}
+        if "margin_budget" in progress:
+            sizing["margin_budget"] = float(progress["margin_budget"])
+        if outcome:
+            return json.loads(outcome) | sizing
         status = "pending"
         if progress.get("close_reason"):
             status = "closing"
@@ -72,7 +75,7 @@ class TradeLedger:
             status = "protected"
         elif progress.get("entry_sent"):
             status = "entry_ordered"
-        return {"status": status}
+        return {"status": status, **sizing}
 
     def outcome(self, signal_id):
         status = self.status(signal_id)
@@ -205,7 +208,7 @@ class BinanceTrade:
         if self.market.now() >= self.signal["expires_at"]:
             return self.finish({"status": "entry_expired"}, "失败", "已过入场窗口。")
         try:
-            await self.sdk.call("prepare", self.symbol)
+            margin_budget = await self.sdk.call("prepare", self.symbol)
         except BinanceError as exc:
             if exc.unknown or exc.retry_after is not None:
                 raise
@@ -215,16 +218,19 @@ class BinanceTrade:
         bid, ask, last = (d(quote[key]) for key in ("bid", "ask", "last"))
         low, high = sorted((d(self.signal["stop_loss"]), d(self.signal["take_profit"])))
         size_price = max(limit, ask, d(quote["mark"]))
-        quantity = self.rules.quantity(size_price, MARGIN * LEVERAGE)
+        quantity = self.rules.quantity(limit, margin_budget * LEVERAGE, sizing_price=size_price)
         remaining = min(5000, self.signal["expires_at"] - now_ms() - 800)
         if remaining <= 0 or self.market.now() >= self.signal["expires_at"] - 500:
             return self.finish({"status": "entry_expired"}, "失败", "报价核验结束时已过入场窗口。")
+        if quantity is None:
+            return self.finish({"status": "entry_rejected"}, "失败",
+                               f"{margin_budget:f} USDT 保证金预算对应的仓位不符合币安数量或最小名义额限制。")
         book_quantity = d(quote["ask_size" if self.long else "bid_size"])
-        if (not quantity or book_quantity < quantity or not low < last < high
+        if (book_quantity < quantity or not low < last < high
                 or (ask > limit if self.long else bid < limit)
                 or not -500 <= self.market.now() - quote["ticker_at"] <= 2000):
             return self.finish({"status": "entry_unfilled"}, "失败", "当前币安盘口无法按计划限价入场。")
-        self.save(entry_sent=self.market.now())
+        self.save(entry_sent=self.market.now(), margin_budget=f"{margin_budget:f}")
         try:
             order = await self.sdk.call("enter", self.symbol, self.long, limit, quantity, self.entry_id, remaining)
         except BinanceError as exc:
@@ -258,7 +264,9 @@ class BinanceTrade:
             if order is None or order["algoStatus"] != "NEW":
                 return await self.close_position(quantity, f"{('止损' if leg == 'stop' else '止盈')}单已结束或无法核实，仍有剩余仓位")
         if not self.state.get("protected"):
-            self.notice("protected", "成功", f"实际开仓均价 {position['entryPrice']} USDT，数量 {quantity}。"
+            budget = self.state.get("margin_budget")
+            sizing = f"保证金预算 {budget} USDT。" if budget is not None else ""
+            self.notice("protected", "成功", f"实际开仓均价 {position['entryPrice']} USDT，数量 {quantity}。{sizing}"
                         f"止盈 {self.signal['take_profit']}，止损 {self.signal['stop_loss']}，保护单均已挂好。")
             self.save(protected=True)
 
