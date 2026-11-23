@@ -234,6 +234,11 @@ class WechatBridge:
         self.store.save(state)
 
     def publish(self, signal):
+        if signal.get("execution_mode") in ("demo", "live"):
+            body = " · ".join(self.signal_text(signal).splitlines())
+            self.publish_trade(TradeNotice(signal["trade_agent_id"], "entry_signal", signal["instrument"],
+                                           "信号已发布", body))
+            return
         if self.binding is None or self.binding.expired or not self.binding.context:
             return
         if self.signals.full():

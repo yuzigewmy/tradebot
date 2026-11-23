@@ -81,6 +81,48 @@ def test_owner_qr_reply_and_live_signal_use_same_bound_context(tmp_path):
     asyncio.run(scenario())
 
 
+def test_binance_signal_reaches_owner_after_trade_finishes_and_service_restarts(tmp_path):
+    from spot_agent.perpetual_trade import TradeNotice
+    from spot_agent.wechat_bridge import Binding
+
+    signal = {"id": "btc-signal", "instrument": "BTC-USDT-SWAP", "side": "long", "strategy": "btc_trend_reclaim",
+              "entry": 100000.1, "stop_loss": 99000.0, "take_profit": 104000.0, "net_reward_risk": 4,
+              "expires_at": now_ms() - 1000, "execution_mode": "live", "exchange": "Binance",
+              "trade_agent_id": "trade-example", "margin_percent": 25, "leverage": 30}
+    sent = []
+
+    async def scenario():
+        store = BindingStore(tmp_path / "private" / "binding.json")
+        store.save(Binding(base=BASE_URL, owner="owner", token="mock-key", context="owner-context"))
+        finished = asyncio.Event()
+
+        async def wire(request):
+            if request.url.path.endswith("/getupdates"):
+                await asyncio.Future()
+            message = json.loads(request.content)["msg"]
+            assert message["to_user_id"] == "owner"
+            sent.append(message["item_list"][0]["text_item"]["text"])
+            if len(sent) == 2:
+                finished.set()
+            return httpx.Response(200, json={"ret": 0})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as session:
+            bridge = WechatBridge(ILink(session), store, None, signal_message, lambda _: False)
+            bridge.publish(signal)
+            bridge.publish_trade(TradeNotice("trade-example", "closed", signal["instrument"], "失败", "限价未成交。"))
+            restored = WechatBridge(ILink(session), store, None, signal_message, lambda _: False)
+            restored.start()
+            try:
+                await asyncio.wait_for(finished.wait(), 2)
+            finally:
+                await restored.close()
+
+    asyncio.run(scenario())
+    assert sent[0].splitlines()[:2] == ["trade-example", "信号已发布"]
+    assert all(term in sent[0] for term in ("币安 实盘", "做多", "100000.1", "99000.0", "104000.0"))
+    assert sent[1] == "trade-example\n失败\n限价未成交。"
+
+
 def test_wechat_rejects_untrusted_host_and_detects_expired_token():
     calls = []
 
