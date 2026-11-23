@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import suppress
+from dataclasses import asdict
 from collections import deque
 import csv
 import hashlib
@@ -16,7 +17,9 @@ import httpx
 from pydantic import BaseModel, Field, ValidationError
 import segno
 
+from .perpetual_history import dump, load
 from .perpetual_market import now_ms
+from .perpetual_trade import TradeNotice
 from .wechat_ilink import BASE_URL, ILinkError, api_base, wechat_url
 
 log = logging.getLogger(__name__)
@@ -80,11 +83,14 @@ class WechatBridge:
         self.ilink, self.store, self.answer = ilink, store, answer
         self.signal_text, self.signal_active = signal_text, signal_active
         self.binding = store.load()
-        self.poll_task = self.send_task = self.pair_task = None
+        self.poll_task = self.send_task = self.pair_task = self.trade_task = None
         self.pairing, self.pair_note, self.qr = "idle", "", None
         self.transport, self.delivery = "offline", None
         self.verify_code = asyncio.Queue(maxsize=1)
         self.signals = asyncio.Queue(maxsize=8)
+        self.trade_ready = asyncio.Event()
+        self.trade_path = store.path.with_name("trade-notices.json")
+        self.trade_outbox = load(self.trade_path) if self.trade_path.exists() else {}
         self.control = asyncio.Lock()
         self.last_poll = self.last_owner_message = None
         self.conversation = deque(maxlen=8)
@@ -94,6 +100,7 @@ class WechatBridge:
             self.transport = "connecting"
             self.poll_task = asyncio.create_task(self.poll(self.binding))
             self.send_task = asyncio.create_task(self.deliver(self.binding))
+            self.trade_task = asyncio.create_task(self.deliver_trades(self.binding))
 
     async def close(self):
         await stop_task(self.pair_task)
@@ -102,7 +109,8 @@ class WechatBridge:
     async def stop_connection(self):
         await stop_task(self.poll_task)
         await stop_task(self.send_task)
-        self.poll_task = self.send_task = None
+        await stop_task(self.trade_task)
+        self.poll_task = self.send_task = self.trade_task = None
         self.signals = asyncio.Queue(maxsize=8)
 
     def view(self):
@@ -219,6 +227,7 @@ class WechatBridge:
         state.context = message.context_token
         self.last_owner_message = now_ms()
         self.store.save(state)
+        self.trade_ready.set()
         text = await self.answer(message.text, self.conversation)
         await self.ilink.send_text(state.base, state.token, state.owner, state.context, client_id("reply", key), text)
         state.seen = [*state.seen[-127:], key]
@@ -249,3 +258,48 @@ class WechatBridge:
                     self.expire(state)
                 self.delivery = {"at": now_ms(), "status": "failed", "instrument": signal["instrument"]}
                 log.warning("微信信号 %s 投递失败（%s）", signal["id"], type(error).__name__)
+
+    def publish_trade(self, notice):
+        if notice.key in self.trade_outbox:
+            return
+        owner = self.binding.owner if self.binding is not None else None
+        self.trade_outbox[notice.key] = {"notice": asdict(notice), "owner": owner, "delivered": False}
+        dump(self.trade_path, self.trade_outbox)
+        self.trade_ready.set()
+
+    async def deliver_trades(self, state):
+        while not state.expired:
+            self.trade_ready.clear()
+            if state.context:
+                for delivery in tuple(self.trade_outbox.values()):
+                    if state.expired:
+                        return
+                    if delivery["delivered"] or delivery["owner"] not in (None, state.owner):
+                        continue
+                    notice = TradeNotice(**delivery["notice"])
+                    timeout = 10
+                    if notice.expires_at is not None:
+                        timeout = min(timeout, (notice.expires_at - now_ms()) / 1000)
+                        if timeout <= 0 or f"{notice.agent_id}:closed" in self.trade_outbox:
+                            continue
+                    if delivery["owner"] is None:
+                        delivery["owner"] = state.owner
+                        dump(self.trade_path, self.trade_outbox)
+                    try:
+                        async with asyncio.timeout(timeout):
+                            await self.ilink.send_text(state.base, state.token, state.owner, state.context,
+                                                       client_id("trade", notice.key), notice.text)
+                    except DELIVERY_ERRORS as error:
+                        if isinstance(error, ILinkError) and error.expired:
+                            self.expire(state)
+                            return
+                        self.delivery = {"at": now_ms(), "status": "failed", "instrument": notice.instrument}
+                        log.warning("微信持仓通知 %s 待重试（%s）", notice.key, type(error).__name__)
+                        break
+                    delivery["delivered"] = True
+                    dump(self.trade_path, self.trade_outbox)
+                    self.delivery = {"at": now_ms(), "status": "sent", "instrument": notice.instrument}
+            try:
+                await asyncio.wait_for(self.trade_ready.wait(), 5)
+            except TimeoutError:
+                continue

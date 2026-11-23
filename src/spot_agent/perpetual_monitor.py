@@ -1,9 +1,10 @@
 """Live OKX subscription and one independent review worker per instrument."""
 
 import asyncio
-from contextlib import asynccontextmanager
-import json
 from collections import deque
+from contextlib import asynccontextmanager
+import hashlib
+import json
 import logging
 
 import aiohttp
@@ -14,18 +15,20 @@ from .agent import AgentError, model_configured
 from .contracts import TIMEFRAMES
 from .perpetual_history import OkxHistory
 from .perpetual_market import CHANNELS, HISTORY_LIMIT, OKX_CANDLES_WS, MarketError, closed_windows, history, instrument_tick, now_ms, parse_candle, quote
-from .perpetual_outcomes import SignalOutcomes
+from .perpetual_outcomes import SignalOutcomes, entry_second
 from .perpetual_review import refresh_candidate, review_event, review_setup, review_timeout
 from .perpetual_strategy import PROFILES, detect_setup, detect_trend_setup, exits_touched, priced_candidate, signal_cooldown
+from .perpetual_trade import TradeAgent
 
 MINUTE = TIMEFRAMES["1m"]
 logger = logging.getLogger(__name__)
 
 
 class SignalJournal:
-    def __init__(self, path, on_signal=None):
+    def __init__(self, path, on_signal=None, *, follow_trades=False):
         self.path = path
         self.on_signal = on_signal
+        self.follow_trades = follow_trades
         self.records = deque(maxlen=120)
         self.outcome_path = path.with_name(f"{path.stem}-outcomes.jsonl")
         self.outcomes = {}
@@ -43,6 +46,9 @@ class SignalJournal:
         self.outcomes[signal_id] = outcome
 
     def append(self, record):
+        if self.follow_trades and entry_second(record) < record["expires_at"]:
+            identifier = hashlib.sha256(record["id"].encode()).hexdigest()[:20]
+            record = record | {"trade_agent_id": f"trade-{identifier}"}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as target:
             target.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
@@ -296,15 +302,32 @@ class PerpetualMonitor:
 
 
 @asynccontextmanager
-async def live_monitors(journal_path, instruments, on_signal=None):
-    journal = SignalJournal(journal_path, on_signal)
+async def live_monitors(journal_path, instruments, on_signal=None, *, on_trade=None):
+    agents = set()
+
+    def assign(record):
+        if on_trade is not None and "trade_agent_id" in record:
+            agent = TradeAgent(record, outcomes, market_client, model_client, on_trade)
+            task = tasks.create_task(agent.run(), name=record["trade_agent_id"])
+            agents.add(task)
+            task.add_done_callback(agents.discard)
+
+    def publish(record):
+        assign(record)
+        if on_signal is not None:
+            on_signal(record)
+
+    journal = SignalJournal(journal_path, publish, follow_trades=on_trade is not None)
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12), trust_env=True) as market_client, httpx.AsyncClient() as model_client:
         monitors = {key: PerpetualMonitor(key, market_client, model_client, journal) for key in instruments}
         outcomes = SignalOutcomes(OkxHistory(market_client, journal_path.parent / "perpetual-outcome-market"), journal)
         async with asyncio.TaskGroup() as tasks:
-            tracking = tasks.create_task(outcomes.run())
+            tracking = tasks.create_task(outcomes.run(skip_assigned=on_trade is not None))
+            for record in journal.records:
+                assign(record)
             try:
                 yield monitors
             finally:
-                tracking.cancel()
                 await asyncio.gather(*(monitor.stop() for monitor in monitors.values()))
+                for task in (tracking, *agents):
+                    task.cancel()

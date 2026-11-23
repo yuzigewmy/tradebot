@@ -33,13 +33,14 @@ def time_label(ts):
 
 def signal_message(signal):
     hold = f"\n持仓截止　{time_label(signal['exit_at'])}（北京时间）" if "exit_at" in signal else ""
+    agent = f"\n跟踪子 agent　{signal['trade_agent_id']}" if "trade_agent_id" in signal else ""
     return (f"【OKX 永续开仓信号】\n{signal['instrument']} · {SIDES[signal['side']]}\n"
             f"策略　{STRATEGIES[signal['strategy']]}\n"
             f"开仓参考　{signal['entry']} USDT\n"
             f"止盈　{signal['take_profit']} USDT\n"
             f"止损　{signal['stop_loss']} USDT\n"
             f"费用后收益风险比　{signal['net_reward_risk']} R\n"
-            f"入场有效至　{time_label(signal['expires_at'])}（北京时间）{hold}")
+            f"入场有效至　{time_label(signal['expires_at'])}（北京时间）{hold}{agent}")
 
 
 class NoArguments(BaseModel):

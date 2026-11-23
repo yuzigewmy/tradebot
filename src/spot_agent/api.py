@@ -32,8 +32,11 @@ async def lifespan(app):
     def forward_signal(signal):
         bridge.publish(signal)
 
+    def forward_trade(notice):
+        bridge.publish_trade(notice)
+
     async with (httpx.AsyncClient() as wechat_client,
-                live_monitors(ROOT / "data" / "perpetual-signals.jsonl", INSTRUMENTS, forward_signal) as monitors):
+                live_monitors(ROOT / "data" / "perpetual-signals.jsonl", INSTRUMENTS, forward_signal, on_trade=forward_trade) as monitors):
         research = WechatResearch(monitors, monitors[INSTRUMENTS[0]].model_client)
         bridge = WechatBridge(ILink(wechat_client), BindingStore(ROOT / "data" / "wechat" / "binding.json"),
                               research.answer, signal_message, research.active)
