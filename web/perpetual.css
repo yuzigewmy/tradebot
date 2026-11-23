@@ -22,6 +22,10 @@ dl { margin: 0; }
 .review-section p { margin: 6px 0; font-size: 12px; }
 .signal-history td:first-child, .signal-history td:last-child { width: auto; }
 .signal-history tr { white-space: nowrap; }
+.signal-history [data-outcome] strong { font: 600 13px var(--font); }
+.signal-history [data-outcome="take_profit"] strong { color: var(--positive); }
+.signal-history [data-outcome="stop_loss"] strong { color: var(--negative); }
+.signal-history [data-outcome] small { display: block; font: inherit; }
 @media (max-width: 900px) {
   .perpetual-layout { grid-template-columns: minmax(0, 1fr); }
   .perpetual-main .cycle-summary { display: block; }
@@ -34,5 +38,6 @@ dl { margin: 0; }
   .perpetual-main .toolbar select { width: 100%; }
   .signal-levels { grid-template-columns: 1fr 1fr; }
   .signal-history tr { white-space: normal; display: grid; grid-template-columns: 1fr 1fr; }
+  .signal-history [data-outcome] { grid-column: 1 / -1; }
   .signal-history td::before { content: attr(data-label) " "; color: var(--muted); font-size: 11px; }
 }

@@ -12,7 +12,9 @@ from pydantic import ValidationError
 
 from .agent import AgentError, model_configured
 from .contracts import TIMEFRAMES
+from .perpetual_history import OkxHistory
 from .perpetual_market import CHANNELS, HISTORY_LIMIT, OKX_CANDLES_WS, MarketError, closed_windows, history, instrument_tick, now_ms, parse_candle, quote
+from .perpetual_outcomes import SignalOutcomes
 from .perpetual_review import refresh_candidate, review_event, review_setup, review_timeout
 from .perpetual_strategy import PROFILES, detect_setup, detect_trend_setup, exits_touched, priced_candidate, signal_cooldown
 
@@ -25,9 +27,20 @@ class SignalJournal:
         self.path = path
         self.on_signal = on_signal
         self.records = deque(maxlen=120)
+        self.outcome_path = path.with_name(f"{path.stem}-outcomes.jsonl")
+        self.outcomes = {}
         if path.exists():
             with path.open(encoding="utf-8") as entries:
                 self.records.extend(map(json.loads, entries))
+
+        if self.outcome_path.exists():
+            with self.outcome_path.open(encoding="utf-8") as entries:
+                self.outcomes.update(map(json.loads, entries))
+
+    def save_outcome(self, signal_id, outcome):
+        with self.outcome_path.open("a", encoding="utf-8") as target:
+            target.write(json.dumps([signal_id, outcome], allow_nan=False) + "\n")
+        self.outcomes[signal_id] = outcome
 
     def append(self, record):
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -277,7 +290,8 @@ class PerpetualMonitor:
             "model_configured": model_configured(), "policy_id": policy_id, "policy_version": policy["version"],
             "charts": {tf: {"closed": bars[-100:], "current": self.forming[tf]} for tf, bars in self.bars.items()},
             "evaluation": self.evaluation, "quote": self.last_quote, "review": self.review_state,
-            "signals": signals, "active_signal_id": active_id,
+            "signals": [{**row, "outcome": self.journal.outcomes.get(row["id"], {"status": "pending"})} for row in signals],
+            "active_signal_id": active_id,
         }
 
 
@@ -286,7 +300,11 @@ async def live_monitors(journal_path, instruments, on_signal=None):
     journal = SignalJournal(journal_path, on_signal)
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12), trust_env=True) as market_client, httpx.AsyncClient() as model_client:
         monitors = {key: PerpetualMonitor(key, market_client, model_client, journal) for key in instruments}
-        try:
-            yield monitors
-        finally:
-            await asyncio.gather(*(monitor.stop() for monitor in monitors.values()))
+        outcomes = SignalOutcomes(OkxHistory(market_client, journal_path.parent / "perpetual-outcome-market"), journal)
+        async with asyncio.TaskGroup() as tasks:
+            tracking = tasks.create_task(outcomes.run())
+            try:
+                yield monitors
+            finally:
+                tracking.cancel()
+                await asyncio.gather(*(monitor.stop() for monitor in monitors.values()))

@@ -7,6 +7,10 @@ const periodNames = {"1m": "1m", "15m": "15m", "1h": "1H"};
 const sides = {long: "做多", short: "做空", mixed: "方向未一致"};
 const setups = {pullback: "旧版趋势回踩", breakout: "旧版收缩放量突破", trend_pullback: "十五分钟趋势回踩", channel_breakout: "十五分钟区间突破"};
 const statusLabels = {stopped: "已停止", online: "行情在线", connecting: "连接中", reconnecting: "重连中", error: "监控异常"};
+const outcomeLabels = {
+  take_profit: "成功 · 止盈", stop_loss: "失败 · 止损", time_limit: "到期退出",
+  entry_expired: "未入场 · 窗口到期", pending: "追踪中", unverified: "待核实 · 缺成交证据",
+};
 let snapshot = null;
 let period = "15m";
 let chartKey = "";
@@ -132,6 +136,13 @@ function renderSignals() {
     const row = node("tr");
     const cells = [clock(signal.closed_at), `${sides[signal.side]} · ${setups[signal.strategy]}`, price(signal.entry), price(signal.take_profit), price(signal.stop_loss), `${signal.net_reward_risk.toFixed(2)} : 1`];
     row.append(...cells.map((value, i) => { const cell = node("td", value); cell.dataset.label = labels[i]; return cell; }));
+    const {status, at, price: exitPrice} = signal.outcome;
+    const outcome = node("td");
+    outcome.dataset.label = "模拟结果";
+    outcome.dataset.outcome = status;
+    outcome.append(node("strong", outcomeLabels[status]));
+    if (at !== undefined) outcome.append(node("small", `${clock(at)} · ${price(exitPrice)}`));
+    row.append(outcome);
     return row;
   }));
 }
