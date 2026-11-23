@@ -47,8 +47,9 @@ class Position:
 
 
 class PaperAccount:
-    def __init__(self, rules, cash=INITIAL_CASH, leverage=LEVERAGE, risk=RISK_FRACTION):
+    def __init__(self, rules, cash=INITIAL_CASH, leverage=LEVERAGE, risk=RISK_FRACTION, *, fixed_margin=None, funding_charge=None):
         self.rules, self.cash, self.leverage, self.risk = rules, cash, leverage, risk
+        self.fixed_margin, self.funding_charge = fixed_margin, funding_charge
         self.positions, self.marks = {}, {}
         self.trades, self.events = [], []
 
@@ -64,9 +65,19 @@ class PaperAccount:
         notional_per_contract = entry * rules.contract_value
         margin_per_contract = notional_per_contract / self.leverage
         fee_per_contract = notional_per_contract * FEE_RATE
-        cap = min(self.equity() * self.risk / (d(candidate["risk_per_unit"]) * rules.contract_value),
-                  self.cash / (margin_per_contract + fee_per_contract), d(quote[size_key]), rules.max_tier_size)
+        if self.fixed_margin is None:
+            cap = min(self.equity() * self.risk / (d(candidate["risk_per_unit"]) * rules.contract_value),
+                      self.cash / (margin_per_contract + fee_per_contract), d(quote[size_key]), rules.max_tier_size)
+        else:
+            cap = self.fixed_margin / margin_per_contract
         contracts = (cap / rules.lot).to_integral_value(rounding=ROUND_FLOOR) * rules.lot
+        if self.fixed_margin is not None:
+            if contracts > rules.max_tier_size:
+                return "above_tier_size"
+            if quote[size_key] is not None and contracts > d(quote[size_key]):
+                return "insufficient_depth"
+            if self.cash < self.fixed_margin + contracts * fee_per_contract:
+                return "insufficient_cash"
         if contracts < rules.min_size:
             return "below_minimum_size"
         if self.leverage > rules.max_leverage:
@@ -86,9 +97,11 @@ class PaperAccount:
 
     def fund(self, instrument, rate, mark, ts):
         p = self.positions[instrument]
-        payment = -p.sign * d(rate) * d(mark) * p.base
+        charged_rate = p.sign * d(rate) if self.funding_charge is None else self.funding_charge
+        payment = -charged_rate * d(mark) * p.base
         p.funding += payment
-        self.events.append({"at": ts, "event": "funding", "instrument": instrument, "amount": payment, "price": d(mark), "rate": d(rate)})
+        self.events.append({"at": ts, "event": "funding", "instrument": instrument,
+                            "amount": payment, "price": d(mark), "rate": d(rate), "charged_rate": charged_rate})
 
     def close(self, instrument, reason, reference, ts, ambiguous=False, *, trigger_at=None, evidence="mark_1s"):
         p = self.positions.pop(instrument)
