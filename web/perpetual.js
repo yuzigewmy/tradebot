@@ -3,10 +3,12 @@ const formatter = new Intl.NumberFormat("zh-CN", {maximumFractionDigits: 8});
 const timeFormat = new Intl.DateTimeFormat("zh-CN", {timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false});
 const price = (value) => formatter.format(value);
 const clock = (value) => timeFormat.format(value);
-const periodNames = {"1m": "1m", "15m": "15m", "30m": "30m", "1h": "1H"};
+const periodNames = {"1m": "1m", "15m": "15m", "30m": "30m", "1h": "1H", "4h": "4H"};
 const sides = {long: "做多", short: "做空", mixed: "方向未一致"};
 const compressionStrategy = "eth_compression_short";
-const setups = {[compressionStrategy]: "30 分钟波动收缩做空", pullback: "旧版趋势回踩", breakout: "旧版收缩放量突破", trend_pullback: "十五分钟趋势回踩", channel_breakout: "十五分钟区间突破"};
+const btcStrategy = "btc_trend_reclaim";
+const strategyPeriods = {[compressionStrategy]: "30m", [btcStrategy]: "1h"};
+const setups = {[btcStrategy]: "BTC 多周期均线确认", [compressionStrategy]: "30 分钟波动收缩做空", pullback: "旧版趋势回踩", breakout: "旧版收缩放量突破", trend_pullback: "十五分钟趋势回踩", channel_breakout: "十五分钟区间突破"};
 const statusLabels = {stopped: "已停止", online: "行情在线", connecting: "连接中", reconnecting: "重连中", error: "监控异常"};
 const outcomeLabels = {
   take_profit: "成功 · 止盈", stop_loss: "失败 · 止损", time_limit: "到期退出",
@@ -46,8 +48,8 @@ function render() {
   const label = statusLabels[snapshot.status];
   if (status.textContent !== label) status.textContent = label;
   status.dataset.status = snapshot.status;
-  const compression = snapshot.selected_strategy === compressionStrategy;
-  const signalMode = compression ? "模拟信号 · 250 USDT 逐仓 · 30 倍"
+  const fixedSignal = snapshot.selected_strategy in strategyPeriods;
+  const signalMode = fixedSignal ? "模拟信号 · 250 USDT 逐仓 · 30 倍"
     : snapshot.model_configured ? "信号模式 · 仅复核合格候选" : "模型未配置";
   $("#model-config").textContent = snapshot.mode === "observe" ? "观察模式 · 收盘评估" : signalMode;
   $("#start-monitor").textContent = snapshot.running ? "应用方式" : "启动监控";
@@ -56,7 +58,7 @@ function render() {
   $("#market-note").textContent = snapshot.market_note;
   $("#policy-label").textContent = `${snapshot.policy_version} · ${snapshot.policy_id}`;
   renderChart();
-  renderEvidence(compression);
+  renderEvidence(fixedSignal);
   renderSignals();
 }
 
@@ -93,11 +95,14 @@ function renderChart() {
   }, {responsive: true, displayModeBar: false, scrollZoom: true});
 }
 
-function renderEvidence(compression) {
+function renderEvidence(fixedSignal) {
   const evaluation = snapshot.evaluation;
   const setup = evaluation?.setup;
-  $("#setup-title").textContent = setup ? `${sides[setup.side]}${setup.strategy ? ` · ${setups[setup.strategy]}` : " · 等待条件"}` : "暂无收盘评估";
-  const timeframes = compression ? ["1h", "30m", "1m"] : ["1h", "15m", "1m"];
+  const btc = snapshot.selected_strategy === btcStrategy;
+  const compression = snapshot.selected_strategy === compressionStrategy;
+  const title = setup?.strategy ? `${sides[setup.side]} · ${setups[setup.strategy]}` : btc ? "等待多空条件" : setup ? `${sides[setup.side]} · 等待条件` : "暂无收盘评估";
+  $("#setup-title").textContent = title;
+  const timeframes = btc ? ["4h", "1h", "30m"] : compression ? ["1h", "30m", "1m"] : ["1h", "15m", "1m"];
   $("#swap-context").replaceChildren(...(evaluation ? timeframes.map((tf) => {
     const values = evaluation.context[tf];
     const row = node("div");
@@ -107,7 +112,15 @@ function renderEvidence(compression) {
   }) : []));
   const setupInfo = $("#setup-info");
   setupInfo.hidden = !setup;
-  if (setup) {
+  if (setup && btc) {
+    setupInfo.replaceChildren(...setup.legs.map((leg) => {
+      const trend = leg.trend_pass ? "通过" : "等待";
+      const cross = leg.range_cross ? "通过" : "等待";
+      const volume = leg.volume_pass ? "通过" : "等待";
+      return metric(`${periodNames[leg.timeframe]} ${sides[leg.side]} · ${clock(leg.closed_at)} 北京`,
+        `趋势 ${trend} · 穿越 ${cross} · 量能 ${volume}（${leg.volume_ratio.toFixed(2)}×）`);
+    }));
+  } else if (setup) {
     const trigger = compression ? "30m" : "15m";
     setupInfo.replaceChildren(
       metric(`${trigger} 收盘 · 北京`, clock(evaluation.context[trigger].closed_at)),
@@ -121,7 +134,7 @@ function renderEvidence(compression) {
   const info = $("#quote-info");
   info.hidden = !quote;
   if (quote) info.replaceChildren(metric("标记价 · USDT", price(quote.mark)), metric("预计资金费率", `${(100 * quote.funding_rate).toFixed(4)}%`), metric("报价时点 · 北京", clock(quote.ticker_at)), metric("资金费结算 · 北京", clock(quote.funding_at)));
-  $("#review-heading").textContent = compression ? "规则与模拟入场" : "模型复核";
+  $("#review-heading").textContent = fixedSignal ? "规则与模拟入场" : "模型复核";
   const review = snapshot.review;
   $("#review-meta").textContent = snapshot.mode === "observe" ? "行情观察模式" : review ? `${clock(review.closed_at)} 收盘 · ${review.note}` : "等待策略候选";
   const candidate = snapshot.mode === "signals" ? review?.candidate : null;
@@ -172,7 +185,7 @@ async function refresh(resetMode = false) {
       syncInstrumentControls();
       $("#review-mode").value = data.mode;
       $("#strategy-select").value = data.selected_strategy;
-      if (data.selected_strategy === compressionStrategy) selectPeriod("30m");
+      if (data.selected_strategy in strategyPeriods) selectPeriod(strategyPeriods[data.selected_strategy]);
     }
     snapshot = data;
     $("#monitor-error").hidden = true;
@@ -189,7 +202,7 @@ async function changeMonitor(action, body) {
   $("#monitor-error").hidden = true;
   try {
     snapshot = await request(action, body);
-    if (action === "/start" && snapshot.selected_strategy === compressionStrategy) selectPeriod("30m");
+    if (action === "/start" && snapshot.selected_strategy in strategyPeriods) selectPeriod(strategyPeriods[snapshot.selected_strategy]);
   }
   catch (error) { showError(error); }
   finally { command = false; $("#instrument").disabled = false; $("#strategy-select").disabled = false; render(); }
@@ -202,10 +215,10 @@ function selectPeriod(value) {
 
 function syncInstrumentControls() {
   const eth = $("#instrument").value === "ETH-USDT-SWAP";
-  const option = $("#strategy-select").querySelector(`[value="${compressionStrategy}"]`);
-  option.disabled = !eth;
-  $('[data-period="30m"]').hidden = !eth;
-  if (!eth && period === "30m") selectPeriod("15m");
+  $(`#strategy-select [value="${compressionStrategy}"]`).disabled = !eth;
+  $(`#strategy-select [value="${btcStrategy}"]`).disabled = eth;
+  $('[data-period="4h"]').hidden = eth;
+  if (eth && period === "4h") selectPeriod("15m");
 }
 
 $("#instrument").addEventListener("change", () => {

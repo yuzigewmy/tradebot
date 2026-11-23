@@ -25,7 +25,7 @@ MINUTE = TIMEFRAMES["1m"]
 SIDES = {"long": "做多", "short": "做空"}
 STRATEGIES = {"pullback": "旧版趋势回踩", "breakout": "旧版收缩放量突破",
               "trend_pullback": "十五分钟趋势回踩", "channel_breakout": "十五分钟区间突破",
-              "eth_compression_short": "30 分钟波动收缩做空"}
+              "eth_compression_short": "30 分钟波动收缩做空", "btc_trend_reclaim": "BTC 多周期均线确认"}
 
 
 def time_label(ts):

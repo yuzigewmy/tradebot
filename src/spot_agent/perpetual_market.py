@@ -10,7 +10,7 @@ from .contracts import TIMEFRAMES
 
 OKX_HTTP = "https://www.okx.com"
 OKX_CANDLES_WS = "wss://ws.okx.com/ws/v5/business"
-BARS = {"1m": "1m", "15m": "15m", "1h": "1H", "30m": "30m"}
+BARS = {"1m": "1m", "15m": "15m", "1h": "1H", "30m": "30m", "4h": "4H"}
 CHANNELS = {f"candle{bar}": timeframe for timeframe, bar in BARS.items()}
 WINDOW = 160
 HISTORY_LIMIT = 240
