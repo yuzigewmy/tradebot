@@ -1,6 +1,6 @@
 # 加密研究台
 
-本地 BTC/ETH 研究助手，提供现货分析和 OKX USDT 永续开仓研判。现货按同一截止时间分析日线、4H、1H，生成中文报告、条件情景和手工持仓评估。
+本地 BTC/ETH 研究助手，提供现货分析、USDT 永续研判和可选的币安自动下单。现货按同一截止时间分析日线、4H、1H，生成中文报告、条件情景和手工持仓评估。
 
 ## 启动
 
@@ -28,6 +28,8 @@ python -m venv .venv
 - 调研、模式和复跑命令见[永续策略升级](docs/perpetual-v2.md)。策略参数与模型复核提示词见 [15m-policy.json](skills/perpetual-entry/15m-policy.json) 和 [15m-review.md](skills/perpetual-entry/15m-review.md)。
 
 历史回测与实时模拟使用同一逐仓账户，默认 BTC/ETH 共用 100 USDT、25×、单笔计划止损风险为账户权益的 1%。回测读取 OKX 公开成交、盘口、标记价和已结算资金费率，并实际调用策略 Skill。运行命令、执行明细和数据边界见[永续回测与实时模拟](docs/perpetual-backtest.md)。
+
+币安模式支持公开盘口和收盘 K 线，也可使用官方 SDK 接入 Demo 或实盘。配置和验收步骤见[币安永续自动下单](docs/binance-futures.md)。
 
 ## 微信助手
 
