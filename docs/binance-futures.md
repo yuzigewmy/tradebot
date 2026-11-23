@@ -11,6 +11,8 @@
 
 `demo` 与 `live` 使用各自的 HMAC API 密钥。由账户持有人将密钥填入运行实例的私有 `.env` 或由服务管理器注入同名环境变量。
 
+Windows 本机可在私有 `.env.binance-live` 里配置 `live` 和实盘密钥，再运行 `powershell -File .\start.ps1 -Live -Background`。控制页监听 `127.0.0.1:8765`，启动日志写入 `logs/`。停止旧实例后再启动，确保同一个微信绑定只有一个进程使用。
+
 ```dotenv
 BINANCE_FUTURES_MODE=demo
 BINANCE_FUTURES_API_KEY=
