@@ -22,7 +22,7 @@ def archive_url(instrument, day):
     return f"https://static.okx.com/cdn/okx/match/orderbook/pro/L2/400lv/daily/{date:%Y%m%d}/{instrument}-L2orderbook-400lv-{date}.tar.gz"
 
 
-def sample_books(blocks, times):
+def sample_books(blocks, times, depth=1):
     """Each file begins with a TAR header and offers a fresh snapshot every 15 minutes."""
     if not times:
         return {}
@@ -47,7 +47,12 @@ def sample_books(blocks, times):
                 at = times[pos]
                 if asks and bids and book_time is not None and 0 <= at - book_time <= 15 * SECOND:
                     ask, bid = min(asks), max(bids)
-                    sampled[at] = [bid, ask, bids[bid], asks[ask], book_time]
+                    snapshot = [bid, ask, bids[bid], asks[ask], book_time]
+                    if depth > 1:
+                        bid_levels = [(price, bids[price]) for price in sorted(bids, reverse=True)[:depth]]
+                        ask_levels = [(price, asks[price]) for price in sorted(asks)[:depth]]
+                        snapshot.extend((bid_levels, ask_levels))
+                    sampled[at] = snapshot
                 pos += 1
             if pos == len(times):
                 return sampled
@@ -72,7 +77,7 @@ def sample_books(blocks, times):
     return sampled
 
 
-def acquire_day(instrument, day, times, path):
+def acquire_day(instrument, day, times, path, depth=1):
     if path.exists():
         return
     url = archive_url(instrument, day)
@@ -81,7 +86,7 @@ def acquire_day(instrument, day, times, path):
             result = {"url": url, "status": "unpublished", "quotes": {}}
         else:
             response.raise_for_status()
-            result = {"url": url, "status": "ok", "quotes": sample_books(response.iter_raw(256 * 1024), times)}
+            result = {"url": url, "status": "ok", "quotes": sample_books(response.iter_raw(256 * 1024), times, depth)}
     dump(path, result)
     print(f"L2 {instrument} {url[-17:-7]} {len(result['quotes'])}/{len(times)} {result['status']}", flush=True)
 
