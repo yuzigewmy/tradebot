@@ -13,6 +13,8 @@ const statusLabels = {stopped: "已停止", online: "行情在线", connecting: 
 const outcomeLabels = {
   take_profit: "成功 · 止盈", stop_loss: "失败 · 止损", time_limit: "到期退出",
   entry_expired: "未入场 · 窗口到期", pending: "追踪中", unverified: "待核实 · 缺成交证据",
+  entry_unfilled: "未成交", entry_rejected: "开仓受阻", entry_skipped: "未送单", entry_ordered: "核对入场单",
+  closing: "平仓核对中", protected: "止盈止损已挂", binance_closed: "已结案", public_signal: "行情信号",
 };
 let snapshot = null;
 let period = "15m";
@@ -49,8 +51,20 @@ function render() {
   if (status.textContent !== label) status.textContent = label;
   status.dataset.status = snapshot.status;
   const fixedSignal = snapshot.selected_strategy in strategyPeriods;
-  const signalMode = fixedSignal ? "模拟信号 · 250 USDT 逐仓 · 30 倍"
+  const binance = snapshot.exchange === "Binance";
+  const mode = snapshot.execution_mode;
+  const marketLabel = {quotes: "币安行情", demo: "币安 Demo", live: "币安实盘"}[mode] ?? "OKX";
+  const canTrade = mode === "demo" || mode === "live";
+  const signalMode = binance ? `${marketLabel} · ${canTrade ? "自动下单 · 250 USDT 逐仓 · 30 倍" : "信号"}`
+    : fixedSignal ? "模拟信号 · 250 USDT 逐仓 · 30 倍"
     : snapshot.model_configured ? "信号模式 · 仅复核合格候选" : "模型未配置";
+  $("#exchange-label").textContent = `${marketLabel} · USDT 线性永续`;
+  $("#execution-label").textContent = canTrade ? `${marketLabel} · 每个合约同时最多一仓`
+    : `${marketLabel} · 研究信号 · 无下单权限`;
+  $("#signal-result-label").textContent = canTrade ? "下单结果" : binance ? "信号结果" : "模拟结果";
+  $('#review-mode [value="signals"]').textContent = canTrade ? "自动下单并推送" : "生成并推送信号";
+  $("#stop-monitor").textContent = canTrade ? "停止开新仓" : "停止监控";
+  $("#strategy-select").disabled = binance || command;
   $("#model-config").textContent = snapshot.mode === "observe" ? "观察模式 · 收盘评估" : signalMode;
   $("#start-monitor").textContent = snapshot.running ? "应用方式" : "启动监控";
   $("#start-monitor").disabled = command;
@@ -133,8 +147,12 @@ function renderEvidence(fixedSignal) {
   const quote = snapshot.quote;
   const info = $("#quote-info");
   info.hidden = !quote;
-  if (quote) info.replaceChildren(metric("标记价 · USDT", price(quote.mark)), metric("预计资金费率", `${(100 * quote.funding_rate).toFixed(4)}%`), metric("报价时点 · 北京", clock(quote.ticker_at)), metric("资金费结算 · 北京", clock(quote.funding_at)));
-  $("#review-heading").textContent = fixedSignal ? "规则与模拟入场" : "模型复核";
+  if (quote) info.replaceChildren(
+    metric("最新成交 · USDT", price(quote.last)), metric("买一 / 卖一", `${price(quote.bid)} / ${price(quote.ask)}`),
+    metric("标记价 · USDT", price(quote.mark)), metric("资金费率参考", `${(100 * quote.funding_rate).toFixed(4)}%`),
+    metric("盘口时点 · 北京", clock(quote.ticker_at)), metric("资金费结算 · 北京", clock(quote.funding_at)),
+  );
+  $("#review-heading").textContent = fixedSignal ? (snapshot.exchange === "Binance" ? "规则与入场" : "规则与模拟入场") : "模型复核";
   const review = snapshot.review;
   $("#review-meta").textContent = snapshot.mode === "observe" ? "行情观察模式" : review ? `${clock(review.closed_at)} 收盘 · ${review.note}` : "等待策略候选";
   const candidate = snapshot.mode === "signals" ? review?.candidate : null;
@@ -166,12 +184,13 @@ function renderSignals() {
     const row = node("tr");
     const cells = [clock(signal.closed_at), `${sides[signal.side]} · ${setups[signal.strategy]}`, price(signal.entry), price(signal.take_profit), price(signal.stop_loss), `${signal.net_reward_risk.toFixed(2)} : 1`];
     row.append(...cells.map((value, i) => { const cell = node("td", value); cell.dataset.label = labels[i]; return cell; }));
-    const {status, at, price: exitPrice} = signal.outcome;
+    const {status, at, price: exitPrice, verdict, pnl_usdt: pnl} = signal.outcome;
     const outcome = node("td");
-    outcome.dataset.label = "模拟结果";
+    outcome.dataset.label = $("#signal-result-label").textContent;
     outcome.dataset.outcome = status;
-    outcome.append(node("strong", outcomeLabels[status]));
+    outcome.append(node("strong", [verdict, outcomeLabels[status]].filter(Boolean).join(" · ")));
     if (at !== undefined) outcome.append(node("small", `${clock(at)} · ${price(exitPrice)}`));
+    if (pnl !== undefined) outcome.append(node("small", `净盈亏 ${price(pnl)} USDT`));
     row.append(outcome);
     return row;
   }));
@@ -205,7 +224,7 @@ async function changeMonitor(action, body) {
     if (action === "/start" && snapshot.selected_strategy in strategyPeriods) selectPeriod(strategyPeriods[snapshot.selected_strategy]);
   }
   catch (error) { showError(error); }
-  finally { command = false; $("#instrument").disabled = false; $("#strategy-select").disabled = false; render(); }
+  finally { command = false; $("#instrument").disabled = false; render(); }
 }
 
 function selectPeriod(value) {

@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="/static/styles.css">
   <link rel="stylesheet" href="/static/perpetual.css">
   <script defer src="/static/plotly.min.js"></script>
-  <script defer src="/static/perpetual.js?v=3"></script>
+  <script defer src="/static/perpetual.js?v=4"></script>
 </head>
 <body>
   <header class="app-header">
@@ -17,7 +17,7 @@
     <nav class="workspace-nav" aria-label="研究台"><a href="/">现货</a><a href="/perpetual" aria-current="page">永续合约</a><a href="/wechat">微信</a></nav>
   </header>
   <main class="perpetual-main">
-    <div class="page-heading"><div><h1>永续开仓研判</h1><p>OKX · USDT 线性永续</p></div><span id="monitor-status" class="status-tag" role="status">读取监控状态</span></div>
+    <div class="page-heading"><div><h1>永续开仓研判</h1><p id="exchange-label">USDT 线性永续</p></div><span id="monitor-status" class="status-tag" role="status">读取监控状态</span></div>
     <form id="monitor-form" class="toolbar">
       <label>合约<select id="instrument"><option value="BTC-USDT-SWAP">BTC / USDT</option><option value="ETH-USDT-SWAP">ETH / USDT</option></select></label>
       <label>监控方式<select id="review-mode"><option value="observe">行情观察</option><option value="signals">生成并推送信号</option></select></label>
@@ -65,9 +65,9 @@
     <section class="evidence-section">
       <div class="section-heading"><h2>信号记录</h2><span id="policy-label" class="quiet mono"></span></div>
       <p id="signals-empty" class="quiet">暂无开仓信号。</p>
-      <div class="table-scroll" id="history-table" hidden><table class="signal-history"><thead><tr><th>触发收盘 / 北京时间</th><th>策略</th><th>开仓参考</th><th>止盈</th><th>止损</th><th>净收益风险比</th><th scope="col">模拟结果</th></tr></thead><tbody id="signal-rows"></tbody></table></div>
+      <div class="table-scroll" id="history-table" hidden><table class="signal-history"><thead><tr><th>触发收盘 / 北京时间</th><th>策略</th><th>开仓参考</th><th>止盈</th><th>止损</th><th>净收益风险比</th><th id="signal-result-label" scope="col">信号结果</th></tr></thead><tbody id="signal-rows"></tbody></table></div>
     </section>
-    <footer>研究信号 · 无下单权限 · 费用与资金费为估算<a href="/docs">API 文档 ↗</a></footer>
+    <footer><span id="execution-label">USDT 线性永续</span><a href="/docs">API 文档 ↗</a></footer>
   </main>
 </body>
 </html>

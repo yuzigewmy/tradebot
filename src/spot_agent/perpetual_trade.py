@@ -140,11 +140,21 @@ class TradeAgent:
                         logger.warning("持仓子 agent %s 提前退出复核未完成（%s）", self.signal["trade_agent_id"], type(error).__name__)
             await asyncio.sleep(5)
 
+    def now(self):
+        return now_ms()
+
+    async def get_quote(self):
+        return await quote(self.market, self.instrument)
+
+    async def recent_candles(self):
+        rows = await public_data(self.market, "market/candles", instId=self.instrument, bar="1m", limit=2)
+        return [parse_candle(row)[0] for row in rows]
+
     async def advise(self, prospect):
         expires = prospect.closed_at + MINUTE if self.cutoff is None else min(prospect.closed_at + MINUTE, self.cutoff)
-        if now_ms() >= expires:
+        if self.now() >= expires:
             return
-        market_quote = await quote(self.market, self.instrument)
+        market_quote = await self.get_quote()
         if self.revalidate(prospect, market_quote, expires) is None:
             return
         review = await review_position(self.model, {
@@ -155,13 +165,11 @@ class TradeAgent:
             "close": prospect.close, "proposed_action": prospect.kind, "quote": market_quote,
             "recent_closed_candles": list(self.recent),
         })
-        if review.decision != prospect.kind or now_ms() >= expires:
+        if review.decision != prospect.kind or self.now() >= expires:
             return
-        market_quote, candles = await asyncio.gather(
-            quote(self.market, self.instrument), public_data(self.market, "market/candles", instId=self.instrument, bar="1m", limit=2))
+        market_quote, candles = await asyncio.gather(self.get_quote(), self.recent_candles())
         bottom, top = sorted((self.stop, self.target))
-        for raw in candles:
-            bar, _ = parse_candle(raw)
+        for bar in candles:
             if bar[0] >= prospect.closed_at and (d(bar[3]) <= bottom or d(bar[2]) >= top):
                 return
         if (price := self.revalidate(prospect, market_quote, expires)) is None:
@@ -173,14 +181,14 @@ class TradeAgent:
             evidence = f"最大有利变动 {self.peak / self.risk:.2f} R，已回吐 {giveback:.2f} R"
         else:
             evidence = f"连续 {self.structure_breaks} 根一分钟收盘失守入场结构 {self.anchor} USDT"
-        body = (f"{position_label(self.signal)} 建议{action}，持仓仍在追踪。{evidence}。"
+        body = (f"{self.signal.get('execution_label', position_label(self.signal))} 建议{action}，持仓仍在追踪。{evidence}。"
                 f"当前平仓参考 {price} USDT，原止盈 {self.target}，原止损 {self.stop}。")
         self.notify(TradeNotice(self.signal["trade_agent_id"], prospect.kind, self.instrument,
                                 "成功" if profit else "失败", body, expires))
         self.notified.add(prospect.kind)
 
     def revalidate(self, prospect, market_quote, expires):
-        now = now_ms()
+        now = self.now()
         if now >= expires or quote_issue(market_quote, now):
             return
         price = d(market_quote["bid" if self.sign == 1 else "ask"])

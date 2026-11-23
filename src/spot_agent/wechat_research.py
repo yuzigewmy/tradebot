@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from .agent import AgentError, model_configured, responses_config
 from .contracts import AnalyzeInput, TIMEFRAMES
-from .perpetual_market import MarketError, closed_windows, history, now_ms, quote
+from .perpetual_market import MarketError, closed_windows, now_ms
 from .perpetual_strategy import detect_trend_setup
 from .service import ROOT, analyze
 
@@ -36,7 +36,12 @@ def signal_message(signal):
     hold = f"\n持仓截止　{time_label(signal['exit_at'])}（北京时间）" if "exit_at" in signal else ""
     agent = f"\n跟踪子 agent　{signal['trade_agent_id']}" if "trade_agent_id" in signal else ""
     position = f"\n模拟逐仓　{signal['margin_budget']} USDT × {signal['leverage']} 倍" if "margin_budget" in signal else ""
-    return (f"【OKX 永续开仓信号】\n{signal['instrument']} · {SIDES[signal['side']]}\n"
+    exchange = signal.get("exchange", "OKX")
+    if exchange == "Binance":
+        mode = {"quotes": "行情", "demo": "Demo", "live": "实盘"}[signal["execution_mode"]]
+        position = f"\n计划逐仓　{signal['margin_budget']} USDT × {signal['leverage']} 倍"
+        exchange = f"币安 {mode}"
+    return (f"【{exchange} 永续开仓信号】\n{signal['instrument']} · {SIDES[signal['side']]}\n"
             f"策略　{STRATEGIES[signal['strategy']]}\n"
             f"开仓参考　{signal['entry']} USDT\n"
             f"止盈　{signal['take_profit']} USDT\n"
@@ -66,8 +71,8 @@ class BacktestArgs(NoArguments):
 
 
 TOOL_SCHEMAS = {
-    "market_snapshot": (MarketArgs, "读取 OKX 最新已收盘 K 线指标、结构和趋势证据。现货有日线、四小时、一小时。永续有一小时、十五分钟、一分钟。"),
-    "perpetual_quote": (AssetArgs, "读取 OKX USDT 永续最新成交价、买卖一档、标记价、资金费率及时间。"),
+    "market_snapshot": (MarketArgs, "读取最新已收盘 K 线指标、结构和趋势证据，结果标明交易所。现货有日线、四小时、一小时。永续有一小时、十五分钟、一分钟。"),
+    "perpetual_quote": (AssetArgs, "读取当前数据源的 USDT 永续最新成交价、买卖一档、标记价、资金费率及时间。"),
     "recent_signals": (SignalArgs, "查询 BTC、ETH 或两者最近的正式开仓信号、有效状态、开仓参考、止盈和止损。"),
     "monitor_status": (NoArguments, "查询 BTC 与 ETH 永续监控是否运行、最新收盘时间和状态。"),
     "backtest_summary": (BacktestArgs, "读取本地最近一次指定策略的永续模拟报告。查询组合时用 all，单独查询区间突破或趋势回踩时用对应策略。"),
@@ -104,7 +109,8 @@ class WechatResearch:
         self.model_client = model_client
 
     def active(self, signal):
-        return self.monitors[signal["instrument"]].signal_is_active(signal, now_ms())
+        monitor = self.monitors[signal["instrument"]]
+        return monitor.signal_is_active(signal, monitor.now())
 
     async def answer(self, text, conversation):
         if not text:
@@ -169,8 +175,9 @@ class WechatResearch:
                     return await self.snapshot(args.asset, args.market)
                 case "perpetual_quote":
                     instrument = f"{args.asset}-USDT-SWAP"
-                    data = await quote(self.monitors[instrument].market_client, instrument)
-                    return {"exchange": "OKX", "instrument": instrument, **data,
+                    monitor = self.monitors[instrument]
+                    data = await monitor.get_quote()
+                    return {"exchange": monitor.exchange, "instrument": instrument, **data,
                             "as_of_beijing": time_label(data["ticker_at"]), "mark_at_beijing": time_label(data["mark_at"]),
                             "funding_at_beijing": time_label(data["funding_at"])}
                 case "recent_signals":
@@ -220,17 +227,17 @@ class WechatResearch:
         instrument = f"{asset}-USDT-SWAP"
         monitor = self.monitors[instrument]
         evaluation = monitor.evaluation
-        if monitor.status == "online" and evaluation and now_ms() - evaluation["closed_at"] < 2 * MINUTE:
+        if monitor.status == "online" and evaluation and monitor.now() - evaluation["closed_at"] < 2 * MINUTE:
             snapshot = {key: evaluation[key] for key in ("closed_at", "context", "setup")}
         else:
             timeframes = ("1m", "15m", "1h")
-            data = await asyncio.gather(*(history(monitor.market_client, instrument, tf) for tf in timeframes))
+            data = await asyncio.gather(*(monitor.history(tf) for tf in timeframes))
             bars = {tf: series[0] for tf, series in zip(timeframes, data, strict=True)}
             end = bars["1m"][-1][0] + MINUTE
             windows = closed_windows(bars, end)
-            if windows is None or now_ms() - end >= 2 * MINUTE:
+            if windows is None or monitor.now() - end >= 2 * MINUTE:
                 raise MarketError("各周期最新收盘线未齐全")
             snapshot = {"closed_at": end, **detect_trend_setup(windows)}
-        return {"exchange": "OKX", "instrument": instrument, "market": "perpetual", **snapshot,
+        return {"exchange": monitor.exchange, "instrument": instrument, "market": "perpetual", **snapshot,
                 "as_of_beijing": time_label(snapshot["closed_at"]),
                 "closed_at_beijing_by_timeframe": {tf: time_label(row["closed_at"]) for tf, row in snapshot["context"].items()}}

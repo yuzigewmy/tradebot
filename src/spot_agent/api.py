@@ -17,6 +17,8 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import __version__
 from .agent import AgentError, model_configured, run_agent
+from .binance_monitor import binance_monitors
+from .binance_sdk import BinanceSettings
 from .contracts import AnalyzeInput, ImportInput, InsightInput, PortfolioInput
 from .market import MarketFrame
 from .perpetual_api import INSTRUMENTS, router as perpetual_router
@@ -29,20 +31,29 @@ from .wechat_research import WechatResearch, signal_message
 
 @asynccontextmanager
 async def lifespan(app):
+    binance = BinanceSettings.from_env()
+
     def forward_signal(signal):
         bridge.publish(signal)
 
     def forward_trade(notice):
         bridge.publish_trade(notice)
 
-    async with (httpx.AsyncClient() as wechat_client,
-                live_monitors(ROOT / "data" / "perpetual-signals.jsonl", INSTRUMENTS, forward_signal, on_trade=forward_trade) as monitors):
+    if binance.mode == "off":
+        runtime = live_monitors(ROOT / "data" / "perpetual-signals.jsonl", INSTRUMENTS, forward_signal, on_trade=forward_trade)
+    else:
+        runtime = binance_monitors(ROOT / "data", binance, forward_signal, forward_trade)
+    async with httpx.AsyncClient() as wechat_client, runtime as monitors:
         research = WechatResearch(monitors, monitors[INSTRUMENTS[0]].model_client)
         bridge = WechatBridge(ILink(wechat_client), BindingStore(ROOT / "data" / "wechat" / "binding.json"),
                               research.answer, signal_message, research.active)
         app.state.perpetual, app.state.wechat = monitors, bridge
+        app.state.binance_mode = binance.mode
         bridge.start()
         try:
+            if binance.mode != "off":
+                for monitor in monitors.values():
+                    monitor.start("signals" if binance.trading else "observe")
             yield
         finally:
             await bridge.close()
@@ -110,8 +121,10 @@ async def model_network_error(request, error):
 
 
 @app.get("/api/health")
-def health():
-    return {"status": "ok", "version": __version__, "model_configured": model_configured(), "trading_enabled": False}
+def health(request: Request):
+    mode = request.app.state.binance_mode
+    return {"status": "ok", "version": __version__, "model_configured": model_configured(),
+            "execution_mode": mode, "trading_enabled": mode in ("demo", "live")}
 
 
 @app.post("/api/analyze")

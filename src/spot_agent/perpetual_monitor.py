@@ -65,6 +65,8 @@ class SignalJournal:
 
 
 class PerpetualMonitor:
+    exchange = "OKX"
+
     def __init__(self, instrument, market_client, model_client, journal, paper=None, *, profile="v2"):
         self.instrument = instrument
         self.channels = {name: period for name, period in CHANNELS.items()
@@ -110,7 +112,7 @@ class PerpetualMonitor:
             self.review_state = None
         self.mode, self.selected_strategy = mode, strategy
         if not self.running:
-            self.status, self.market_note = "connecting", "连接 OKX 并加载 K 线"
+            self.status, self.market_note = "connecting", f"连接 {self.exchange} 并加载 K 线"
             self.task = asyncio.create_task(self.run())
             self.task.add_done_callback(self.on_exit)
         elif strategy_changed and self.status == "online":
@@ -164,7 +166,7 @@ class PerpetualMonitor:
             for timeframe, (rows, current) in zip(self.channels.values(), series, strict=True):
                 self.bars[timeframe], self.forming[timeframe] = rows, current
             self.status, self.market_note = "online", "OKX 行情已连接"
-            self.skip_through = now_ms() // MINUTE * MINUTE
+            self.skip_through = self.now() // MINUTE * MINUTE
             self.last_evaluated = 0
             self.evaluate()
             while True:
@@ -175,7 +177,7 @@ class PerpetualMonitor:
                     message = await ws.receive(timeout=6)
                 if message.type is not aiohttp.WSMsgType.TEXT:
                     raise MarketError("OKX candle WebSocket disconnected")
-                if now_ms() - self.bars["1m"][-1][0] > 2 * MINUTE + 20_000:
+                if self.now() - self.bars["1m"][-1][0] > 2 * MINUTE + 20_000:
                     raise MarketError("OKX 一分钟收盘确认超时，需要重同步")
                 if message.data == "pong":
                     continue
@@ -232,7 +234,7 @@ class PerpetualMonitor:
         self.market_note = "策略已计算最新收盘 K 线"
         if self.mode == "observe":
             return
-        if not setup["strategy"] or initial or end <= self.skip_through or not 0 <= now_ms() - end < MINUTE:
+        if not setup["strategy"] or initial or end <= self.skip_through or not 0 <= self.now() - end < MINUTE:
             return
         if self.selected_strategy not in ("all", setup["strategy"]):
             return
@@ -266,18 +268,33 @@ class PerpetualMonitor:
                     reason = str(error) if isinstance(error, (AgentError, MarketError)) else type(error).__name__
                     self.review_state.update(status="error", note=f"本次研判未完成（{reason}）")
 
+    def now(self):
+        return now_ms()
+
+    async def get_quote(self, **options):
+        return await quote(self.market_client, self.instrument, **options)
+
+    async def history(self, timeframe):
+        return await history(self.market_client, self.instrument, timeframe)
+
+    def previous_outcome(self, previous):
+        return self.journal.outcomes.get(previous["id"])
+
+    def fixed_candidate(self, policy, setup, market_quote, published_at):
+        return fixed_signal_candidate(policy, setup, market_quote, self.rules, published_at)
+
     async def review(self, job):
         policy = FIXED_STRATEGIES.get(job["setup"]["strategy"])
         if policy:
             return await self.review_fixed_signal(job, policy)
         self.review_state.update(status="reviewing", note="读取盘口、标记价与资金费率")
         end, setup = job["closed_at"], job["setup"]
-        market_quote = (await quote(self.market_client, self.instrument, settled=self.profile == "v2") if self.paper is None else
+        market_quote = (await self.get_quote(settled=self.profile == "v2") if self.paper is None else
                         await self.paper.market_quote(self.instrument, end))
         if self.latest_job is not job:
             return
         self.last_quote = market_quote
-        candidate, reason = priced_candidate(setup, market_quote, self.tick, end, now_ms(), profile=self.profile)
+        candidate, reason = priced_candidate(setup, market_quote, self.tick, end, self.now(), profile=self.profile)
         self.review_state["candidate"] = candidate
         if candidate is None:
             self.review_state.update(status="wait", note=reason)
@@ -285,7 +302,7 @@ class PerpetualMonitor:
         if not model_configured():
             self.review_state.update(status="unconfigured", note="模型未配置，规则已计算，不发开仓信号")
             return
-        timeout = review_timeout(candidate, now_ms())
+        timeout = review_timeout(candidate, self.now())
         if timeout <= 0:
             self.review_state.update(status="discarded", note="开仓窗口已过期")
             return
@@ -298,17 +315,17 @@ class PerpetualMonitor:
         if result["decision"] != "confirm":
             self.review_state.update(status="wait", note=reason or "模型复核：等待")
             return
-        refreshed = (await quote(self.market_client, self.instrument, settled=self.profile == "v2") if self.paper is None else
+        refreshed = (await self.get_quote(settled=self.profile == "v2") if self.paper is None else
                      await self.paper.market_quote(self.instrument))
         if self.latest_job is not job:
             return
         self.last_quote = refreshed
-        candidate, issue = refresh_candidate(candidate, setup, refreshed, self.tick, self.forming["1m"], now_ms(), profile=self.profile)
+        candidate, issue = refresh_candidate(candidate, setup, refreshed, self.tick, self.forming["1m"], self.now(), profile=self.profile)
         if issue:
             self.review_state.update(status="discarded", note=issue)
             return
         signal = {
-            **candidate, "instrument": self.instrument, "published_at": now_ms(),
+            **candidate, "instrument": self.instrument, "published_at": self.now(),
             "id": f"{self.instrument}:{end}:{candidate['policy_id']}", "event": event, "trigger_candle": job["trigger_candle"], "verified_quote": refreshed,
             "model_review": result,
         }
@@ -317,25 +334,25 @@ class PerpetualMonitor:
     async def review_fixed_signal(self, job, policy):
         end, setup = job["closed_at"], job["setup"]
         entry_at = end + MINUTE
-        await asyncio.sleep(max(0, entry_at - now_ms()) / 1000)
+        await asyncio.sleep(max(0, entry_at - self.now()) / 1000)
         if self.latest_job is not job:
             return
         previous = next((s for s in self.journal.for_instrument(self.instrument) if s["strategy"] == policy.strategy), None)
         if previous is not None:
-            outcome = self.journal.outcomes.get(previous["id"])
+            outcome = self.previous_outcome(previous)
             if outcome is None or outcome["status"] == "unverified":
-                self.review_state.update(status="wait", note="这套策略已有一笔模拟持仓")
+                self.review_state.update(status="wait", note="这套策略有一笔信号仍在追踪")
                 return
             if end - previous["closed_at"] < FIXED_COOLDOWN_MINUTES * MINUTE:
                 self.review_state.update(status="wait", note="上一条信号仍在冷却期")
                 return
         self.review_state.update(status="reviewing", note="核对入场时间与一档盘口深度")
-        market_quote = await quote(self.market_client, self.instrument)
+        market_quote = await self.get_quote()
         if self.latest_job is not job:
             return
         self.last_quote = market_quote
-        published_at = now_ms()
-        candidate, reason = fixed_signal_candidate(policy, setup, market_quote, self.rules, published_at)
+        published_at = self.now()
+        candidate, reason = self.fixed_candidate(policy, setup, market_quote, published_at)
         if candidate is None:
             self.review_state.update(status="wait", note=reason)
             return
@@ -365,7 +382,7 @@ class PerpetualMonitor:
 
     def view(self):
         signals = self.journal.for_instrument(self.instrument)[:20]
-        now, active_id = now_ms(), None
+        now, active_id = self.now(), None
         if signals and self.signal_is_active(signals[0], now):
             active_id = signals[0]["id"]
         policy, policy_id, _ = PROFILES[self.profile]
@@ -373,7 +390,8 @@ class PerpetualMonitor:
         if self.fixed_policy:
             version, policy_id = self.fixed_policy.version, self.fixed_policy.policy_id
         return {
-            "instrument": self.instrument, "mode": self.mode, "selected_strategy": self.selected_strategy, "running": self.running,
+            "instrument": self.instrument, "exchange": self.exchange, "mode": self.mode,
+            "selected_strategy": self.selected_strategy, "running": self.running,
             "status": self.status, "market_note": self.market_note, "server_time": now,
             "model_configured": model_configured(), "policy_id": policy_id, "policy_version": version,
             "charts": {tf: {"closed": bars[-100:], "current": self.forming[tf]} for tf, bars in self.bars.items()},
