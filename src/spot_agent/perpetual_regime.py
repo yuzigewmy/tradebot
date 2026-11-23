@@ -9,6 +9,8 @@ import talib
 
 from .perpetual_history import MINUTE
 
+BREAKOUT_ATR_BUFFER = 0.03
+
 
 @dataclass(frozen=True)
 class Setup:
@@ -56,6 +58,15 @@ def rolling(values, count, method):
     return getattr(series, method)().to_numpy()
 
 
+def prior_channel(frame, lookback):
+    return shift(rolling(frame["high"], lookback, "max")), shift(rolling(frame["low"], lookback, "min"))
+
+
+def compression_range(frame):
+    normalized_atr = frame["atr"] / frame["close"]
+    return shift(normalized_atr), 0.9 * shift(rolling(normalized_atr, 60, "median"))
+
+
 def indicators(bars):
     closed_at, opening, high, low, close, volume = bars.T
     ema = talib.EMA(close, 20)
@@ -81,8 +92,7 @@ class InstrumentFeatures:
         f = self.frames[setup.period]
         t, high, low, close = (f[k] for k in ("times", "high", "low", "close"))
         atr, vol = f["atr"], f["volume_ratio"]
-        prior_high = shift(rolling(high, setup.lookback, "max"))
-        prior_low = shift(rolling(low, setup.lookback, "min"))
+        prior_high, prior_low = prior_channel(f, setup.lookback)
         trend_bars = self.frames[60 if setup.period <= 30 else 240]
         ht = np.searchsorted(trend_bars["times"], t, side="right") - 1
         trend_ema, trend_slow, trend_adx = (trend_bars[k][ht] for k in ("ema", "slow", "adx"))
@@ -107,11 +117,11 @@ class InstrumentFeatures:
         else:
             regime_up = regime_down = adx_valid
         if setup.family in ("channel", "compression"):
-            longs = close > prior_high + 0.03 * atr
-            shorts = close < prior_low - 0.03 * atr
+            longs = close > prior_high + BREAKOUT_ATR_BUFFER * atr
+            shorts = close < prior_low - BREAKOUT_ATR_BUFFER * atr
             if setup.family == "compression":
-                relative = atr / close
-                quiet = shift(relative) < shift(rolling(relative, 60, "median")) * 0.9
+                relative, threshold = compression_range(f)
+                quiet = relative < threshold
                 longs &= quiet
                 shorts &= quiet
         elif setup.family == "pullback":

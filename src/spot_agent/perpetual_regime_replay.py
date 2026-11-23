@@ -4,7 +4,6 @@ import asyncio
 from bisect import bisect_right
 from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
-from decimal import ROUND_CEILING, ROUND_FLOOR
 
 import numpy as np
 
@@ -12,10 +11,8 @@ from .perpetual_history import MARK, MINUTE, SECOND, TRADE, load
 from .perpetual_market import InstrumentRules, MarketError
 from .perpetual_paper import FEE_RATE, SLIPPAGE, PaperAccount, d, exit_trigger, tick_exit
 from .perpetual_regime import InstrumentFeatures, Signal
+from .perpetual_regime_terms import CAPITAL, FUNDING_CHARGE, LEVERAGE, MARGIN, adverse_tick, holding_deadline, price_brackets
 
-CAPITAL, MARGIN, LEVERAGE = (d(n) for n in (1000, 250, 30))
-FUNDING_CHARGE = d("0.002")
-MIN_STOP_PCT, MAX_STOP_PCT = 0.004, 0.024
 INSTRUMENTS = ("BTC-USDT-SWAP", "ETH-USDT-SWAP")
 
 
@@ -51,11 +48,6 @@ class Market:
                 if self.start <= at and at + MINUTE < self.end and sign in sides]
 
 
-def adverse_tick(price, sign, tick, slip):
-    price = d(price) * (1 + sign * slip)
-    return (price / tick).to_integral_value(rounding=ROUND_CEILING if sign == 1 else ROUND_FLOOR) * tick
-
-
 @dataclass(frozen=True)
 class Exit:
     instrument: str
@@ -81,20 +73,11 @@ def signal_entry(account, market, signal, idx, *, slip=SLIPPAGE, max_entry_drift
     if max_entry_drift is not None and abs(reference - previous_close) > max_entry_drift * signal.atr:
         return "entry_drift"
     entry = adverse_tick(reference, signal.sign, market.rules[inst].tick, slip)
-    distance = min(MAX_STOP_PCT * float(entry), max(MIN_STOP_PCT * float(entry), signal.bracket.stop_atr * signal.atr))
-    # The bracket is based on price risk. Trading costs are booked separately.
-    stop = entry - signal.sign * d(distance)
-    target = entry + signal.sign * d(distance) * d(signal.bracket.target_r)
-    if target <= 0:
-        return "invalid_target"
+    stop, target = price_brackets(entry, signal.sign, signal.atr, signal.bracket)
     entry_at = market.time(idx)
-    exit_at = market.time(idx + signal.bracket.hold)
-    if funding_buffer:
-        interval = 480 * MINUTE
-        settlement = (entry_at // interval + 1) * interval
-        exit_at = min(exit_at, settlement - funding_buffer * MINUTE)
-        if exit_at <= entry_at:
-            return "funding_window"
+    exit_at = holding_deadline(entry_at, signal.bracket.hold, funding_buffer)
+    if exit_at <= entry_at:
+        return "funding_window"
     levels = {"side": "long" if signal.sign == 1 else "short", "closed_at": signal.at, "strategy": signal.strategy,
               "stop_loss": stop, "take_profit": target, "exit_at": exit_at}
     simulated_quote = {"bid": entry, "ask": entry, "bid_size": depth, "ask_size": depth, "mark": market.mark[inst][idx - 1][4]}
