@@ -3,9 +3,10 @@ const formatter = new Intl.NumberFormat("zh-CN", {maximumFractionDigits: 8});
 const timeFormat = new Intl.DateTimeFormat("zh-CN", {timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false});
 const price = (value) => formatter.format(value);
 const clock = (value) => timeFormat.format(value);
-const periodNames = {"1m": "1m", "15m": "15m", "1h": "1H"};
+const periodNames = {"1m": "1m", "15m": "15m", "30m": "30m", "1h": "1H"};
 const sides = {long: "做多", short: "做空", mixed: "方向未一致"};
-const setups = {pullback: "旧版趋势回踩", breakout: "旧版收缩放量突破", trend_pullback: "十五分钟趋势回踩", channel_breakout: "十五分钟区间突破"};
+const compressionStrategy = "eth_compression_short";
+const setups = {[compressionStrategy]: "30 分钟波动收缩做空", pullback: "旧版趋势回踩", breakout: "旧版收缩放量突破", trend_pullback: "十五分钟趋势回踩", channel_breakout: "十五分钟区间突破"};
 const statusLabels = {stopped: "已停止", online: "行情在线", connecting: "连接中", reconnecting: "重连中", error: "监控异常"};
 const outcomeLabels = {
   take_profit: "成功 · 止盈", stop_loss: "失败 · 止损", time_limit: "到期退出",
@@ -30,8 +31,9 @@ function metric(label, value) {
 
 async function request(path = "", body) {
   const response = await fetch(`/api/perpetual/${$("#instrument").value}${path}`, body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
-  if (!response.ok) throw new Error(`本地监控接口返回 HTTP ${response.status}`);
-  return response.json();
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error?.message ?? `本地监控接口返回 HTTP ${response.status}`);
+  return data;
 }
 
 function showError(error) {
@@ -44,14 +46,17 @@ function render() {
   const label = statusLabels[snapshot.status];
   if (status.textContent !== label) status.textContent = label;
   status.dataset.status = snapshot.status;
-  $("#model-config").textContent = snapshot.mode === "observe" ? "观察模式 · 收盘评估" : snapshot.model_configured ? "信号模式 · 仅复核合格候选" : "模型未配置";
+  const compression = snapshot.selected_strategy === compressionStrategy;
+  const signalMode = compression ? "模拟信号 · 250 USDT 逐仓 · 30 倍"
+    : snapshot.model_configured ? "信号模式 · 仅复核合格候选" : "模型未配置";
+  $("#model-config").textContent = snapshot.mode === "observe" ? "观察模式 · 收盘评估" : signalMode;
   $("#start-monitor").textContent = snapshot.running ? "应用方式" : "启动监控";
   $("#start-monitor").disabled = command;
   $("#stop-monitor").disabled = command || !snapshot.running;
   $("#market-note").textContent = snapshot.market_note;
   $("#policy-label").textContent = `${snapshot.policy_version} · ${snapshot.policy_id}`;
   renderChart();
-  renderEvidence();
+  renderEvidence(compression);
   renderSignals();
 }
 
@@ -88,11 +93,12 @@ function renderChart() {
   }, {responsive: true, displayModeBar: false, scrollZoom: true});
 }
 
-function renderEvidence() {
+function renderEvidence(compression) {
   const evaluation = snapshot.evaluation;
   const setup = evaluation?.setup;
   $("#setup-title").textContent = setup ? `${sides[setup.side]}${setup.strategy ? ` · ${setups[setup.strategy]}` : " · 等待条件"}` : "暂无收盘评估";
-  $("#swap-context").replaceChildren(...(evaluation ? ["1h", "15m", "1m"].map((tf) => {
+  const timeframes = compression ? ["1h", "30m", "1m"] : ["1h", "15m", "1m"];
+  $("#swap-context").replaceChildren(...(evaluation ? timeframes.map((tf) => {
     const values = evaluation.context[tf];
     const row = node("div");
     row.className = "cycle-row";
@@ -101,11 +107,21 @@ function renderEvidence() {
   }) : []));
   const setupInfo = $("#setup-info");
   setupInfo.hidden = !setup;
-  if (setup) setupInfo.replaceChildren(metric("15m 收盘 · 北京", clock(evaluation.context["15m"].closed_at)), metric("15m 量比 · 前二十根", `${setup.volume_ratio.toFixed(2)}×`), metric("此前区间 · USDT", `${price(setup.prior_low)} ~ ${price(setup.prior_high)}`), metric("趋势过滤", setup.trend_pass ? "已通过" : "等待方向或强度"));
+  if (setup) {
+    const trigger = compression ? "30m" : "15m";
+    setupInfo.replaceChildren(
+      metric(`${trigger} 收盘 · 北京`, clock(evaluation.context[trigger].closed_at)),
+      metric(`${trigger} 量比 · 前二十根`, `${setup.volume_ratio.toFixed(2)}×`),
+      metric("此前区间 · USDT", `${price(setup.prior_low)} ~ ${price(setup.prior_high)}`),
+      compression ? metric("收缩与跌破", `${setup.compressed ? "已收缩" : "未收缩"} · ${setup.range_cross ? "已跌破" : "未跌破"}`)
+        : metric("趋势过滤", setup.trend_pass ? "已通过" : "等待方向或强度"),
+    );
+  }
   const quote = snapshot.quote;
   const info = $("#quote-info");
   info.hidden = !quote;
   if (quote) info.replaceChildren(metric("标记价 · USDT", price(quote.mark)), metric("预计资金费率", `${(100 * quote.funding_rate).toFixed(4)}%`), metric("报价时点 · 北京", clock(quote.ticker_at)), metric("资金费结算 · 北京", clock(quote.funding_at)));
+  $("#review-heading").textContent = compression ? "规则与模拟入场" : "模型复核";
   const review = snapshot.review;
   $("#review-meta").textContent = snapshot.mode === "observe" ? "行情观察模式" : review ? `${clock(review.closed_at)} 收盘 · ${review.note}` : "等待策略候选";
   const candidate = snapshot.mode === "signals" ? review?.candidate : null;
@@ -126,7 +142,8 @@ function renderSignals() {
     $("#signal-status").textContent = active ? "已确认 · 参考价尚未到期" : "历史信号 · 开仓窗口不可用";
     $("#signal-title").textContent = `${sides[latest.side]} · ${setups[latest.strategy]}`;
     const hold = latest.exit_at == null ? "" : ` · 持仓截止 ${clock(latest.exit_at)}`;
-    $("#signal-clock").textContent = `发布 ${clock(latest.published_at)} · 入场截止 ${clock(latest.expires_at)}${hold} 北京时间`;
+    const size = latest.margin_budget === undefined ? "" : ` · 逐仓 ${latest.margin_budget} USDT × ${latest.leverage} 倍`;
+    $("#signal-clock").textContent = `发布 ${clock(latest.published_at)} · 入场截止 ${clock(latest.expires_at)}${hold} 北京时间${size}`;
     $("#signal-levels").replaceChildren(metric(latest.side === "long" ? "开仓上限 · USDT" : "开仓下限 · USDT", price(latest.entry)), metric("止盈 · USDT", price(latest.take_profit)), metric("止损 · USDT", price(latest.stop_loss)), metric("净收益风险比", `${latest.net_reward_risk.toFixed(2)} : 1`));
   }
   $("#history-table").hidden = !latest;
@@ -152,8 +169,10 @@ async function refresh(resetMode = false) {
   const data = await request();
   if (!command && data.instrument === $("#instrument").value) {
     if (resetMode || !snapshot) {
+      syncInstrumentControls();
       $("#review-mode").value = data.mode;
       $("#strategy-select").value = data.selected_strategy;
+      if (data.selected_strategy === compressionStrategy) selectPeriod("30m");
     }
     snapshot = data;
     $("#monitor-error").hidden = true;
@@ -168,12 +187,29 @@ async function changeMonitor(action, body) {
   $("#start-monitor").disabled = true;
   $("#stop-monitor").disabled = true;
   $("#monitor-error").hidden = true;
-  try { snapshot = await request(action, body); }
+  try {
+    snapshot = await request(action, body);
+    if (action === "/start" && snapshot.selected_strategy === compressionStrategy) selectPeriod("30m");
+  }
   catch (error) { showError(error); }
   finally { command = false; $("#instrument").disabled = false; $("#strategy-select").disabled = false; render(); }
 }
 
+function selectPeriod(value) {
+  period = value;
+  document.querySelectorAll("[data-period]").forEach((item) => item.setAttribute("aria-selected", String(item.dataset.period === period)));
+}
+
+function syncInstrumentControls() {
+  const eth = $("#instrument").value === "ETH-USDT-SWAP";
+  const option = $("#strategy-select").querySelector(`[value="${compressionStrategy}"]`);
+  option.disabled = option.hidden = !eth;
+  $('[data-period="30m"]').hidden = !eth;
+  if (!eth && period === "30m") selectPeriod("15m");
+}
+
 $("#instrument").addEventListener("change", () => {
+  syncInstrumentControls();
   $("#start-monitor").disabled = true;
   $("#stop-monitor").disabled = true;
   refresh(true).catch(showError);
@@ -184,8 +220,7 @@ $("#monitor-form").addEventListener("submit", (event) => {
 });
 $("#stop-monitor").addEventListener("click", () => changeMonitor("/stop", {}));
 document.querySelectorAll("[data-period]").forEach((button) => button.addEventListener("click", () => {
-  period = button.dataset.period;
-  document.querySelectorAll("[data-period]").forEach((item) => item.setAttribute("aria-selected", String(item === button)));
+  selectPeriod(button.dataset.period);
   if (snapshot) renderChart();
 }));
 async function poll() {

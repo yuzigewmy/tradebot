@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from .agent import AgentError, model_configured, responses_config
 from .contracts import AnalyzeInput, TIMEFRAMES
-from .perpetual_market import BARS, MarketError, closed_windows, history, now_ms, quote
+from .perpetual_market import MarketError, closed_windows, history, now_ms, quote
 from .perpetual_strategy import detect_trend_setup
 from .service import ROOT, analyze
 
@@ -24,7 +24,8 @@ BEIJING = ZoneInfo("Asia/Shanghai")
 MINUTE = TIMEFRAMES["1m"]
 SIDES = {"long": "做多", "short": "做空"}
 STRATEGIES = {"pullback": "旧版趋势回踩", "breakout": "旧版收缩放量突破",
-              "trend_pullback": "十五分钟趋势回踩", "channel_breakout": "十五分钟区间突破"}
+              "trend_pullback": "十五分钟趋势回踩", "channel_breakout": "十五分钟区间突破",
+              "eth_compression_short": "30 分钟波动收缩做空"}
 
 
 def time_label(ts):
@@ -34,13 +35,14 @@ def time_label(ts):
 def signal_message(signal):
     hold = f"\n持仓截止　{time_label(signal['exit_at'])}（北京时间）" if "exit_at" in signal else ""
     agent = f"\n跟踪子 agent　{signal['trade_agent_id']}" if "trade_agent_id" in signal else ""
+    position = f"\n模拟逐仓　{signal['margin_budget']} USDT × {signal['leverage']} 倍" if "margin_budget" in signal else ""
     return (f"【OKX 永续开仓信号】\n{signal['instrument']} · {SIDES[signal['side']]}\n"
             f"策略　{STRATEGIES[signal['strategy']]}\n"
             f"开仓参考　{signal['entry']} USDT\n"
             f"止盈　{signal['take_profit']} USDT\n"
             f"止损　{signal['stop_loss']} USDT\n"
             f"费用后收益风险比　{signal['net_reward_risk']} R\n"
-            f"入场有效至　{time_label(signal['expires_at'])}（北京时间）{hold}{agent}")
+            f"入场有效至　{time_label(signal['expires_at'])}（北京时间）{hold}{position}{agent}")
 
 
 class NoArguments(BaseModel):
@@ -221,8 +223,9 @@ class WechatResearch:
         if monitor.status == "online" and evaluation and now_ms() - evaluation["closed_at"] < 2 * MINUTE:
             snapshot = {key: evaluation[key] for key in ("closed_at", "context", "setup")}
         else:
-            data = await asyncio.gather(*(history(monitor.market_client, instrument, tf) for tf in BARS))
-            bars = {tf: series[0] for tf, series in zip(BARS, data, strict=True)}
+            timeframes = ("1m", "15m", "1h")
+            data = await asyncio.gather(*(history(monitor.market_client, instrument, tf) for tf in timeframes))
+            bars = {tf: series[0] for tf, series in zip(timeframes, data, strict=True)}
             end = bars["1m"][-1][0] + MINUTE
             windows = closed_windows(bars, end)
             if windows is None or now_ms() - end >= 2 * MINUTE:

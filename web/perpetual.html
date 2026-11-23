@@ -20,8 +20,8 @@
     <div class="page-heading"><div><h1>永续开仓研判</h1><p>OKX · USDT 线性永续</p></div><span id="monitor-status" class="status-tag" role="status">读取监控状态</span></div>
     <form id="monitor-form" class="toolbar">
       <label>合约<select id="instrument"><option value="BTC-USDT-SWAP">BTC / USDT</option><option value="ETH-USDT-SWAP">ETH / USDT</option></select></label>
-      <label>监控方式<select id="review-mode"><option value="observe">行情观察</option><option value="signals">复核并推送信号</option></select></label>
-      <label>开仓策略<select id="strategy-select"><option value="all">回踩与突破</option><option value="channel_breakout">仅区间突破</option><option value="trend_pullback">仅趋势回踩</option></select></label>
+      <label>监控方式<select id="review-mode"><option value="observe">行情观察</option><option value="signals">生成并推送信号</option></select></label>
+      <label>开仓策略<select id="strategy-select"><option value="all">回踩与突破</option><option value="channel_breakout">仅区间突破</option><option value="trend_pullback">仅趋势回踩</option><option value="eth_compression_short" disabled hidden>30 分钟波动收缩做空</option></select></label>
       <button class="primary" id="start-monitor" type="submit" disabled>启动监控</button>
       <button class="secondary" id="stop-monitor" type="button" disabled>停止监控</button>
       <span id="model-config" class="toolbar-note"></span>
@@ -39,6 +39,7 @@
           <div class="tabs" aria-label="K 线周期">
             <button type="button" aria-selected="false" data-period="1m">1m</button>
             <button type="button" aria-selected="true" data-period="15m">15m</button>
+            <button type="button" aria-selected="false" data-period="30m" hidden>30m</button>
             <button type="button" aria-selected="false" data-period="1h">1H</button>
           </div>
           <span id="chart-time" class="quiet"></span>
@@ -54,7 +55,7 @@
         <dl id="setup-info" class="quote-info" hidden></dl>
         <dl id="quote-info" class="quote-info" hidden></dl>
         <div class="subsection review-section">
-          <h3>模型复核</h3><p id="review-meta" class="quiet">等待策略候选</p>
+          <h3 id="review-heading">模型复核</h3><p id="review-meta" class="quiet">等待策略候选</p>
           <p id="review-cost" class="quiet"></p><p id="review-summary"></p><p id="review-counter"></p><p id="review-evidence" class="quiet mono"></p>
         </div>
       </aside>
@@ -62,7 +63,7 @@
 
     <section class="evidence-section">
       <div class="section-heading"><h2>信号记录</h2><span id="policy-label" class="quiet mono"></span></div>
-      <p id="signals-empty" class="quiet">暂无通过模型和报价复核的信号。</p>
+      <p id="signals-empty" class="quiet">暂无开仓信号。</p>
       <div class="table-scroll" id="history-table" hidden><table class="signal-history"><thead><tr><th>触发收盘 / 北京时间</th><th>策略</th><th>开仓参考</th><th>止盈</th><th>止损</th><th>净收益风险比</th><th scope="col">模拟结果</th></tr></thead><tbody id="signal-rows"></tbody></table></div>
     </section>
     <footer>研究信号 · 无下单权限 · 费用与资金费为估算<a href="/docs">API 文档 ↗</a></footer>

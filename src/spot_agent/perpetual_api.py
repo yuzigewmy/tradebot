@@ -10,7 +10,7 @@ router = APIRouter(prefix="/api/perpetual", tags=["永续合约"])
 
 class MonitorOptions(BaseModel):
     mode: Literal["observe", "signals"] = "observe"
-    strategy: Literal["all", "channel_breakout", "trend_pullback"] = "all"
+    strategy: Literal["all", "channel_breakout", "trend_pullback", "eth_compression_short"] = "all"
 
 
 @router.get("/{instrument}")

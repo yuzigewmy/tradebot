@@ -13,8 +13,10 @@ from pydantic import ValidationError
 
 from .agent import AgentError, model_configured
 from .contracts import TIMEFRAMES
+from .perpetual_compression import (COMPRESSION_COOLDOWN, COMPRESSION_INSTRUMENT, COMPRESSION_POLICY_ID,
+                                   COMPRESSION_STRATEGY, COMPRESSION_VERSION, compression_candidate, compression_setup)
 from .perpetual_history import OkxHistory
-from .perpetual_market import CHANNELS, HISTORY_LIMIT, OKX_CANDLES_WS, MarketError, closed_windows, history, instrument_tick, now_ms, parse_candle, quote
+from .perpetual_market import CHANNELS, HISTORY_LIMIT, OKX_CANDLES_WS, MarketError, closed_windows, history, instrument_rules, instrument_tick, now_ms, parse_candle, quote
 from .perpetual_outcomes import SignalOutcomes, entry_second
 from .perpetual_review import refresh_candidate, review_event, review_setup, review_timeout
 from .perpetual_strategy import PROFILES, detect_setup, detect_trend_setup, exits_touched, priced_candidate, signal_cooldown
@@ -63,6 +65,8 @@ class SignalJournal:
 class PerpetualMonitor:
     def __init__(self, instrument, market_client, model_client, journal, paper=None, *, profile="v2"):
         self.instrument = instrument
+        self.channels = {name: period for name, period in CHANNELS.items()
+                         if period != "30m" or instrument == COMPRESSION_INSTRUMENT}
         self.market_client = market_client
         self.model_client = model_client
         self.journal = journal
@@ -87,7 +91,16 @@ class PerpetualMonitor:
     def running(self):
         return self.task is not None and not self.task.done()
 
+    @property
+    def uses_compression(self):
+        return self.selected_strategy == COMPRESSION_STRATEGY
+
     def start(self, mode, strategy="all"):
+        if strategy == COMPRESSION_STRATEGY and self.instrument != COMPRESSION_INSTRUMENT:
+            raise ValueError("30 分钟波动收缩做空仅适用于 ETH 永续")
+        if strategy != self.selected_strategy:
+            self.evaluation = None
+            self.last_quote = None
         if (mode, strategy) != (self.mode, self.selected_strategy):
             self.invalidate_review("监控方式已切换")
             self.review_state = None
@@ -135,13 +148,17 @@ class PerpetualMonitor:
 
     async def stream(self):
         async with self.market_client.ws_connect(OKX_CANDLES_WS, timeout=aiohttp.ClientWSTimeout(ws_close=2)) as ws:
-            await ws.send_json({"op": "subscribe", "args": [{"channel": channel, "instId": self.instrument} for channel in CHANNELS]})
-            tick, *series = await asyncio.gather(
-                instrument_tick(self.market_client, self.instrument),
-                *(history(self.market_client, self.instrument, tf) for tf in CHANNELS.values()),
+            await ws.send_json({"op": "subscribe", "args": [{"channel": channel, "instId": self.instrument} for channel in self.channels]})
+            metadata = instrument_rules if self.instrument == COMPRESSION_INSTRUMENT else instrument_tick
+            spec, *series = await asyncio.gather(
+                metadata(self.market_client, self.instrument),
+                *(history(self.market_client, self.instrument, tf) for tf in self.channels.values()),
             )
-            self.tick = tick
-            for timeframe, (rows, current) in zip(CHANNELS.values(), series, strict=True):
+            if self.instrument == COMPRESSION_INSTRUMENT:
+                self.rules, self.tick = spec, spec.tick
+            else:
+                self.tick = spec
+            for timeframe, (rows, current) in zip(self.channels.values(), series, strict=True):
                 self.bars[timeframe], self.forming[timeframe] = rows, current
             self.status, self.market_note = "online", "OKX 行情已连接"
             self.skip_through = now_ms() // MINUTE * MINUTE
@@ -164,7 +181,7 @@ class PerpetualMonitor:
                     if packet["event"] == "error":
                         raise MarketError(f"OKX 订阅失败（{packet['code']}）")
                     continue
-                timeframe = CHANNELS[packet["arg"]["channel"]]
+                timeframe = self.channels[packet["arg"]["channel"]]
                 changed = False
                 for raw in packet["data"]:
                     changed = self.ingest(timeframe, *parse_candle(raw)) or changed
@@ -191,13 +208,16 @@ class PerpetualMonitor:
         end = self.bars["1m"][-1][0] + MINUTE
         if end <= self.last_evaluated:
             return
-        windows = closed_windows(self.bars, end)
+        bars = self.bars if self.uses_compression else {tf: rows for tf, rows in self.bars.items() if tf != "30m"}
+        windows = closed_windows(bars, end)
         if windows is None:
             self.market_note = "等待各周期收盘确认与连续 K 线"
             return
         initial = self.last_evaluated == 0
         self.last_evaluated = end
         analysis = (detect_trend_setup if self.profile == "v2" else detect_setup)(windows)
+        if self.uses_compression:
+            analysis["setup"] = compression_setup(windows["30m"])
         setup = analysis["setup"]
         self.evaluation = {"closed_at": end, **analysis}
         self.market_note = "策略已计算最新收盘 K 线"
@@ -207,14 +227,21 @@ class PerpetualMonitor:
             return
         if self.selected_strategy not in ("all", setup["strategy"]):
             return
+        if self.uses_compression:
+            if end == setup["closed_at"]:
+                self.queue_review(end, windows["30m"][-1], analysis, "等待收盘后一分钟的入场盘口")
+            return
         _, policy_id, _ = PROFILES[self.profile]
         last = next((row["closed_at"] for row in self.journal.for_instrument(self.instrument) if row["policy_id"] == policy_id), None)
         if signal_cooldown(last, end, profile=self.profile):
             self.review_state = {"closed_at": end, "status": "wait", "note": "上一条信号仍在冷却期", "candidate": None, "result": None}
             return
         trigger = "15m" if self.profile == "v2" else "1m"
-        self.latest_job = {"instrument": self.instrument, "closed_at": end, "trigger_candle": windows[trigger][-1], **analysis}
-        self.review_state = {"closed_at": end, "status": "queued", "note": "策略候选等待报价", "candidate": None, "result": None}
+        self.queue_review(end, windows[trigger][-1], analysis, "策略候选等待报价")
+
+    def queue_review(self, end, trigger, analysis, note):
+        self.latest_job = {"instrument": self.instrument, "closed_at": end, "trigger_candle": trigger, **analysis}
+        self.review_state = {"closed_at": end, "status": "queued", "note": note, "candidate": None, "result": None}
         self.review_requested.set()
 
     async def review_loop(self):
@@ -230,6 +257,8 @@ class PerpetualMonitor:
                     self.review_state.update(status="error", note=f"本次研判未完成（{reason}）")
 
     async def review(self, job):
+        if job["setup"]["strategy"] == COMPRESSION_STRATEGY:
+            return await self.review_compression(job)
         self.review_state.update(status="reviewing", note="读取盘口、标记价与资金费率")
         end, setup = job["closed_at"], job["setup"]
         market_quote = (await quote(self.market_client, self.instrument, settled=self.profile == "v2") if self.paper is None else
@@ -272,15 +301,54 @@ class PerpetualMonitor:
             "id": f"{self.instrument}:{end}:{candidate['policy_id']}", "event": event, "trigger_candle": job["trigger_candle"], "verified_quote": refreshed,
             "model_review": result,
         }
+        self.publish_signal(signal, candidate, "候选通过模型与报价复核")
+
+    async def review_compression(self, job):
+        end, setup = job["closed_at"], job["setup"]
+        entry_at = end + MINUTE
+        await asyncio.sleep(max(0, entry_at - now_ms()) / 1000)
+        if self.latest_job is not job:
+            return
+        previous = next((s for s in self.journal.for_instrument(self.instrument) if s["strategy"] == COMPRESSION_STRATEGY), None)
+        if previous is not None:
+            outcome = self.journal.outcomes.get(previous["id"])
+            if outcome is None or outcome["status"] == "unverified":
+                self.review_state.update(status="wait", note="这套策略已有一笔模拟持仓")
+                return
+            if end - previous["closed_at"] < COMPRESSION_COOLDOWN:
+                self.review_state.update(status="wait", note="上一条信号仍在冷却期")
+                return
+        self.review_state.update(status="reviewing", note="核对入场时间与一档盘口深度")
+        market_quote = await quote(self.market_client, self.instrument)
+        if self.latest_job is not job:
+            return
+        self.last_quote = market_quote
+        published_at = now_ms()
+        candidate, reason = compression_candidate(setup, market_quote, self.rules, published_at)
+        if candidate is None:
+            self.review_state.update(status="wait", note=reason)
+            return
+        signal = {**candidate, "instrument": self.instrument, "published_at": published_at,
+                  "id": f"{self.instrument}:{end}:{COMPRESSION_POLICY_ID}", "event": job, "trigger_candle": job["trigger_candle"],
+                  "verified_quote": market_quote, "model_review": None}
+        self.publish_signal(signal, candidate, "收缩、跌破和量能均通过，已发布规则信号")
+
+    def publish_signal(self, signal, candidate, note):
         self.review_state["candidate"] = candidate
         self.journal.append(signal)
         if self.paper is not None:
             self.paper.enqueue(signal)
-        self.review_state.update(status="signal", note="候选通过模型与报价复核")
+        self.review_state.update(status="signal", note=note)
 
     def signal_is_active(self, signal, now):
-        return (self.mode == "signals" and self.status == "online" and self.skip_through < signal["closed_at"] and now < signal["expires_at"]
-                and signal["policy_id"] == PROFILES[self.profile][1]
+        active = (self.mode == "signals" and self.status == "online" and self.skip_through < signal["closed_at"]
+                  and now < signal["expires_at"])
+        if not active:
+            return False
+        if self.uses_compression:
+            outcome = self.journal.outcomes.get(signal["id"])
+            return signal["policy_id"] == COMPRESSION_POLICY_ID and outcome is None
+        return (signal["policy_id"] == PROFILES[self.profile][1]
                 and self.selected_strategy in ("all", signal["strategy"])
                 and not exits_touched(signal, self.forming["1m"]))
 
@@ -290,10 +358,13 @@ class PerpetualMonitor:
         if signals and self.signal_is_active(signals[0], now):
             active_id = signals[0]["id"]
         policy, policy_id, _ = PROFILES[self.profile]
+        version = policy["version"]
+        if self.uses_compression:
+            version, policy_id = COMPRESSION_VERSION, COMPRESSION_POLICY_ID
         return {
             "instrument": self.instrument, "mode": self.mode, "selected_strategy": self.selected_strategy, "running": self.running,
             "status": self.status, "market_note": self.market_note, "server_time": now,
-            "model_configured": model_configured(), "policy_id": policy_id, "policy_version": policy["version"],
+            "model_configured": model_configured(), "policy_id": policy_id, "policy_version": version,
             "charts": {tf: {"closed": bars[-100:], "current": self.forming[tf]} for tf, bars in self.bars.items()},
             "evaluation": self.evaluation, "quote": self.last_quote, "review": self.review_state,
             "signals": [{**row, "outcome": self.journal.outcomes.get(row["id"], {"status": "pending"})} for row in signals],
