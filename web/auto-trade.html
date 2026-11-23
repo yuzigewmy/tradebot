@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>自动开单 · 加密研究台</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/auto-trade.css">
+  <script defer src="/static/auto-trade.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <a href="/" class="brand"><span class="brand-mark" aria-hidden="true">≋</span><strong>加密研究台</strong></a>
+    <nav class="workspace-nav" aria-label="研究台"><a href="/">现货</a><a href="/perpetual">永续合约</a><a href="/static/auto-trade.html" aria-current="page">自动开单</a><a href="/wechat">微信</a></nav>
+  </header>
+  <main class="auto-trade-main">
+    <div class="page-heading">
+      <div><h1>自动开单</h1><p>U 本位永续 · 无人值守</p></div>
+      <div class="runtime-heading">
+        <span class="monitor-state" id="runtime-state" role="status">正在读取后台状态</span>
+        <time class="quiet" id="snapshot-time" hidden></time>
+      </div>
+    </div>
+    <p class="error" id="runtime-error" role="status" hidden>暂时无法读取后台状态，页面会自动重试。</p>
+
+    <dl class="execution-summary" aria-label="执行设置与连接状态">
+      <div><dt>执行环境</dt><dd id="execution-mode">—</dd><dd class="quiet" id="running-count"></dd></div>
+      <div><dt>每单保证金</dt><dd id="margin-budget">—</dd><dd class="quiet">开仓前按当时余额计算</dd></div>
+      <div><dt>杠杆与仓位</dt><dd id="trade-leverage">—</dd><dd class="quiet">每个合约最多同时一仓</dd></div>
+      <div><dt><a href="/wechat">微信机器人</a></dt><dd id="wechat-state">—</dd><dd class="quiet" id="wechat-delivery"></dd></div>
+    </dl>
+
+    <section class="workflow-section" aria-labelledby="workflow-heading">
+      <div class="section-heading">
+        <h2 id="workflow-heading">后台工作流</h2>
+        <div class="contract-switch" role="group" aria-label="选择合约">
+          <button type="button" data-asset="BTC" aria-pressed="true" aria-controls="trade-flow">BTCUSDT</button>
+          <button type="button" data-asset="ETH" aria-pressed="false" aria-controls="trade-flow">ETHUSDT</button>
+        </div>
+      </div>
+      <div class="contract-status">
+        <strong id="contract-strategy">正在读取策略</strong>
+        <span class="monitor-state" id="contract-state"></span>
+        <time class="quiet" id="contract-close" hidden></time>
+        <p class="quiet" id="contract-detail" hidden></p>
+      </div>
+      <ol id="trade-flow" class="trade-flow" role="list">
+        <li><h3>收盘研判</h3><p>读取已收盘 K 线，按 BTC 或 ETH 策略判断入场条件。</p><span class="step-state" id="market-step">等待状态</span></li>
+        <li><h3>发布信号</h3><p>记录方向、入场限价、止盈和止损，同步微信。</p><span class="step-state" id="signal-step">等待状态</span></li>
+        <li><h3>自动开仓</h3><p>核对资金和盘口后提交限价单，未立即成交的部分由币安撤销。</p><span class="step-state" id="entry-step">等待状态</span></li>
+        <li><h3>挂止盈止损</h3><p>按实际仓位先挂止损，再挂止盈。子 agent 跟踪并推送提前退出建议。</p><span class="step-state" id="protection-step">等待状态</span></li>
+        <li><h3>平仓结案</h3><p>触发止盈止损或达到持仓期限时平仓，按币安成交核算结果并推送微信。</p><span class="step-state" id="close-step">等待状态</span></li>
+      </ol>
+      <p class="quiet" id="tracked-signal" hidden></p>
+    </section>
+
+    <section class="activity-section" aria-labelledby="activity-heading">
+      <div class="section-heading">
+        <h2 id="activity-heading">最近信号与结案</h2>
+        <a class="quiet" href="/perpetual">查看永续监控</a>
+      </div>
+      <p class="activity-empty" id="activity-empty" role="status">正在读取信号记录</p>
+      <div class="table-scroll" id="activity-table" hidden>
+        <table aria-labelledby="activity-heading">
+          <thead><tr><th scope="col">发布于（北京时间）</th><th scope="col">合约与方向</th><th scope="col">入场限价</th><th scope="col">止盈</th><th scope="col">止损</th><th scope="col">结果</th><th scope="col">子 agent ID</th></tr></thead>
+          <tbody id="activity-rows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
