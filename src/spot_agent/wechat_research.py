@@ -106,6 +106,27 @@ def format_reply(output):
     raise AgentError("对话模型未返回文字")
 
 
+async def read_chat_response(client, url, headers, payload):
+    async with client.stream("POST", url, headers=headers, json=payload | {"stream": True}, timeout=45) as response:
+        response.raise_for_status()
+        data = []
+        async for line in response.aiter_lines():
+            if line.startswith("data:"):
+                data.append(line[5:].lstrip(" "))
+            elif not line and data:
+                raw = "\n".join(data)
+                data.clear()
+                if raw == "[DONE]":
+                    break
+                event = json.loads(raw)
+                kind = event["type"]
+                if kind == "response.completed":
+                    return event["response"]
+                if kind in ("response.failed", "response.incomplete", "error"):
+                    raise AgentError(f"对话模型未完成回复（{kind}）")
+    raise AgentError("对话模型响应在完成前中断")
+
+
 class WechatResearch:
     def __init__(self, monitors, model_client):
         self.monitors = monitors
@@ -144,11 +165,7 @@ class WechatResearch:
         budget = 8
         for round_number in range(5):
             choice = "auto" if budget and round_number < 4 else "none"
-            response = await self.model_client.post(url, headers=headers, json=payload | {"input": inputs, "tool_choice": choice}, timeout=45)
-            response.raise_for_status()
-            result = response.json()
-            if result["status"] != "completed":
-                raise AgentError("对话模型未完成回复")
+            result = await read_chat_response(self.model_client, url, headers, payload | {"input": inputs, "tool_choice": choice})
             output = result["output"]
             calls = [item for item in output if item["type"] == "function_call"]
             if not calls:

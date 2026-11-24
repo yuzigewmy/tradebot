@@ -149,8 +149,15 @@ def test_chat_answers_freely_and_uses_read_only_tool_for_followup(monkeypatch):
     monkeypatch.setenv("SPOT_LLM_MODEL", "test-model")
     conversation = deque(maxlen=8)
 
+    def stream(output):
+        event = {"type": "response.completed", "response": {"status": "completed", "output": output}}
+        return httpx.Response(200, headers={"Content-Type": "text/event-stream"},
+                              text=f"event: response.completed\ndata: {json.dumps(event)}\n\n")
+
     def wire(request):
         data = json.loads(request.content)
+        if data.get("stream") is not True:
+            return httpx.Response(400, json={"error": {"code": "stream_required"}})
         inputs = data["input"]
         assert data["tool_choice"] == "auto" and data["store"] is False
         if len(inputs) == 1:
@@ -162,10 +169,8 @@ def test_chat_answers_freely_and_uses_read_only_tool_for_followup(monkeypatch):
             text = "BOSS，BTC 永续监控正在运行。"
         else:
             assert inputs[1] == {"role": "assistant", "content": conversation[0][1]}
-            return httpx.Response(200, json={"status": "completed", "output": [
-                {"type": "function_call", "name": "monitor_status", "call_id": "read_status", "arguments": "{}"}]})
-        return httpx.Response(200, json={"status": "completed", "output": [
-            {"type": "message", "content": [{"type": "output_text", "text": text}]}]})
+            return stream([{"type": "function_call", "name": "monitor_status", "call_id": "read_status", "arguments": "{}"}])
+        return stream([{"type": "message", "content": [{"type": "output_text", "text": text}]}])
 
     async def scenario():
         monitor = SimpleNamespace(running=True, mode="observe", selected_strategy="all", status="online", market_note="行情在线", evaluation=None)
@@ -173,5 +178,24 @@ def test_chat_answers_freely_and_uses_read_only_tool_for_followup(monkeypatch):
             assistant = WechatResearch({"BTC-USDT-SWAP": monitor}, model)
             assert "日常问题" in await assistant.answer("介绍一下你自己", conversation)
             assert "正在运行" in await assistant.answer("刚说的那个监控开着吗？", conversation)
+
+    asyncio.run(scenario())
+
+
+def test_chat_does_not_publish_or_remember_partial_reply(monkeypatch):
+    monkeypatch.setenv("SPOT_LLM_BASE_URL", "https://model.example/v1")
+    monkeypatch.setenv("SPOT_LLM_API_KEY", "test-only")
+    monkeypatch.setenv("SPOT_LLM_MODEL", "test-model")
+    conversation = deque(maxlen=8)
+
+    def wire(request):
+        return httpx.Response(200, headers={"Content-Type": "text/event-stream"},
+                              text='data: {"type":"response.output_text.delta","delta":"半条回复"}\n\n')
+
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as model:
+            assistant = WechatResearch({}, model)
+            assert "本次模型对话未完成" in await assistant.answer("测试断流", conversation)
+            assert not conversation
 
     asyncio.run(scenario())
