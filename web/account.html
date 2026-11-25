@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>账户 · 加密研究台</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/account.css">
+  <script defer src="/static/account.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <a href="/" class="brand"><span class="brand-mark" aria-hidden="true">≋</span><strong>加密研究台</strong></a>
+    <nav class="workspace-nav" aria-label="研究台"><a href="/">现货</a><a href="/perpetual">永续合约</a><a href="/static/auto-trade.html">自动开单</a><a href="/account" aria-current="page">账户</a><a href="/wechat">微信</a></nav>
+  </header>
+  <main class="account-main">
+    <div class="page-heading">
+      <div><h1>账户</h1><p id="account-source">币安 U 本位合约钱包</p></div>
+      <p class="quiet" id="snapshot-status" role="status">正在读取账户</p>
+    </div>
+    <p class="error" id="account-error" role="status" hidden></p>
+    <div id="account-content" hidden>
+      <dl class="wallet-summary" aria-label="USDT 钱包概览">
+        <div><dt>钱包余额 · USDT</dt><dd id="wallet-balance"></dd><dd class="metric-note">已入账资金</dd></div>
+        <div><dt>账户权益 · USDT</dt><dd id="equity"></dd><dd class="metric-note">含未实现盈亏</dd></div>
+        <div><dt>可用余额 · USDT</dt><dd id="available"></dd><dd class="metric-note">可用于开仓的资金</dd></div>
+        <div><dt>未实现盈亏 · USDT</dt><dd id="unrealized"></dd><dd class="metric-note">按当前标记价</dd></div>
+      </dl>
+      <div class="account-analysis">
+        <section class="account-section" aria-labelledby="margin-title">
+          <h2 id="margin-title">保证金与开仓预算</h2>
+          <dl class="account-details">
+            <div><dt>持仓 / 挂单初始保证金</dt><dd id="used-margin"></dd></div>
+            <div><dt>初始保证金占权益</dt><dd id="margin-usage"></dd></div>
+            <div><dt id="plan-label">单笔逐仓保证金预算</dt><dd id="plan-margin"></dd></div>
+            <div><dt id="notional-label">计划名义额</dt><dd id="plan-notional"></dd></div>
+          </dl>
+          <p class="quiet account-note" id="plan-status"></p>
+        </section>
+        <section class="account-section" aria-labelledby="risk-title">
+          <h2 id="risk-title">持仓敞口与价格情景</h2>
+          <dl class="account-details">
+            <div><dt>总名义敞口</dt><dd id="exposure"></dd></div>
+            <div><dt>净方向敞口</dt><dd id="net-exposure"></dd></div>
+            <div><dt>总敞口 / 账户权益</dt><dd id="effective-leverage"></dd></div>
+          </dl>
+          <div class="scenario-control">
+            <label for="shock">所有 USDT 持仓同步变动 <output id="shock-pct" for="shock"></output></label>
+            <input type="range" min="-5" max="5" value="-1" step="0.5" id="shock">
+            <output class="mono" id="shock-result" for="shock"></output>
+          </div>
+          <p class="quiet account-note">按当前名义敞口线性估算，未计手续费、滑点或强平。</p>
+        </section>
+      </div>
+      <section class="account-section" aria-labelledby="position-title">
+        <div class="section-heading"><h2 id="position-title">当前持仓</h2><span class="quiet" id="positions-count"></span></div>
+        <p class="quiet" id="no-positions">当前没有合约持仓。</p>
+        <div class="table-scroll" id="positions-table" hidden><table aria-labelledby="position-title">
+          <thead><tr><th>合约</th><th>方向 / 数量</th><th>开仓均价</th><th>标记价</th><th>名义额</th><th>未实现盈亏</th><th>强平价 / 距离</th></tr></thead>
+          <tbody id="position-rows"></tbody>
+        </table></div>
+      </section>
+      <section class="account-section" aria-labelledby="assets-title">
+        <h2 id="assets-title">钱包资产明细</h2>
+        <div class="table-scroll"><table aria-labelledby="assets-title">
+          <thead><tr><th>资产</th><th>钱包余额</th><th>账户权益</th><th>可用余额</th><th>未实现盈亏</th></tr></thead>
+          <tbody id="asset-rows"></tbody>
+        </table></div>
+      </section>
+      <section class="account-section income-section" aria-labelledby="income-title">
+        <div class="section-heading"><h2 id="income-title">近 7 天 USDT 资金归因</h2><p class="quiet" id="income-status" role="status">正在读取币安流水</p></div>
+        <p class="error" id="income-error" role="status" hidden></p>
+        <div id="income-content" hidden>
+          <dl class="income-summary" id="income-summary"></dl>
+          <div class="chart-header">
+            <label>按日查看<select id="income-metric"><option value="trade">交易净额</option><option value="realized">已实现盈亏</option><option value="commission">手续费</option><option value="funding">资金费</option><option value="transfer">净划转</option></select></label>
+            <p class="quiet">北京时间 · 当日截至最近一次读取</p>
+          </div>
+          <ol class="income-chart" id="income-chart" aria-label="选定指标的每日数据"></ol>
+          <p class="quiet account-note" id="income-note">交易净额 = 已实现盈亏 + 手续费 + 资金费。划转和其他流水单列。</p>
+        </div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

@@ -1,0 +1,47 @@
+.account-main dl { margin: 0; }
+.account-main dd { margin: 0; }
+.wallet-summary, .income-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: var(--surface); border-radius: 8px; }
+.wallet-summary > div, .income-summary > div { padding: 16px; min-width: 0; }
+.wallet-summary > div + div, .income-summary > div + div { border-inline-start: 1px solid var(--line); }
+.account-main dt { color: var(--muted); font-size: 12px; }
+.wallet-summary dd { font: 600 24px/1.55 var(--mono); overflow-wrap: anywhere; }
+.wallet-summary .metric-note, .chart-header p { margin: 0; color: var(--muted); font: 12px/1.65 var(--font); }
+.account-analysis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 36px; margin-top: 20px; }
+.account-section { border-top: 1px solid var(--line); padding: 18px 0; }
+.account-section h2 { margin-bottom: 10px; }
+.account-section .section-heading h2, .account-section .section-heading p { margin: 0; }
+.account-details > div { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.account-details dd, .income-summary dd { text-align: right; font: 600 13px/1.6 var(--mono); }
+.account-note { margin: 10px 0 0; }
+.scenario-control { margin-top: 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.scenario-control label { display: inline; }
+.scenario-control input { min-height: 28px; padding: 0; margin: 0; width: min(140px, 100%); accent-color: var(--primary); }
+.scenario-control > output { margin-left: auto; }
+.account-main [data-sign="positive"] { color: var(--positive); }
+.account-main [data-sign="negative"] { color: var(--negative); }
+.account-main table td:first-child, .account-main table td:last-child { width: auto; }
+.account-main table td { font-family: var(--mono); }
+.income-summary { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.income-summary dd { text-align: start; margin-top: 4px; overflow-wrap: anywhere; }
+.chart-header { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin: 16px 0 8px; }
+.chart-header select { min-height: 34px; padding-block: 4px; min-width: 130px; }
+.income-chart { list-style: none; padding: 0; margin: 0; }
+.income-chart li { display: grid; grid-template-columns: 52px minmax(0, 1fr) minmax(78px, auto); align-items: center; gap: 10px; margin: 0; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.income-track { position: relative; height: 12px; background: var(--surface); }
+.income-track::before { content: ""; position: absolute; inset: 0 auto 0 50%; border-inline-start: 1px solid var(--muted); }
+.income-fill { position: absolute; inset: 2px auto 2px 50%; background: var(--positive); }
+.income-fill[data-sign="negative"] { inset-inline: auto 50%; background: var(--negative); }
+.income-amount { text-align: end; }
+@media (max-width: 760px) {
+  .wallet-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .income-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .wallet-summary > div:nth-child(3), .income-summary > div:nth-child(4) { border-inline-start: 0; }
+  .wallet-summary > div:nth-child(n+3), .income-summary > div:nth-child(n+4) { border-top: 1px solid var(--line); }
+  .account-analysis { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+  .wallet-summary dd { font-size: 20px; }
+  .account-main table tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 10px; }
+  .account-main table td::before { content: attr(data-label); display: block; color: var(--muted); font: 11px var(--font); }
+  .chart-header { align-items: start; flex-direction: column; }
+}

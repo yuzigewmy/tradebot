@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import __version__
+from .account_api import AccountReader, router as account_router
 from .agent import AgentError, model_configured, run_agent
 from .binance_monitor import binance_monitors
 from .binance_sdk import BinanceSettings
@@ -49,6 +50,7 @@ async def lifespan(app):
                               research.answer, signal_message, research.active)
         app.state.perpetual, app.state.wechat = monitors, bridge
         app.state.binance_mode = binance.mode
+        app.state.account_reader = AccountReader(binance) if binance.trading else None
         bridge.start()
         try:
             if binance.mode != "off":
@@ -63,6 +65,7 @@ app = FastAPI(title="加密研究台 API", version=__version__, lifespan=lifespa
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
 app.include_router(perpetual_router)
 app.include_router(wechat_router)
+app.include_router(account_router)
 SnapshotId = Annotated[str, PathParameter(pattern=r"^[a-f0-9]{24}$")]
 logger = logging.getLogger("spot_agent")
 
@@ -171,6 +174,11 @@ def index():
 @app.get("/perpetual", include_in_schema=False)
 def perpetual_page():
     return FileResponse(ROOT / "web" / "perpetual.html")
+
+
+@app.get("/account", include_in_schema=False)
+def account_page():
+    return FileResponse(ROOT / "web" / "account.html")
 
 
 @app.get("/wechat", include_in_schema=False)
