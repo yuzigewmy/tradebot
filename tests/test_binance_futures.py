@@ -232,3 +232,62 @@ def test_trade_flattens_only_open_size_when_protection_is_rejected(tmp_path):
             assert ledger.status(signal["id"])["status"] == "closing"
 
     asyncio.run(scenario())
+
+
+def test_trade_uses_exchange_clock_for_entry_window_and_ignores_prior_fills_on_settle(tmp_path, monkeypatch):
+    import sqlite3
+
+    from spot_agent.binance_execution import BinanceTrade, TradeLedger
+
+    exchange_now = 1795419280000
+    # Local clock lags behind Binance by 2 seconds; entry window must still follow exchange time.
+    monkeypatch.setattr("spot_agent.binance_execution.now_ms", lambda: exchange_now - 2000)
+    signal = {"id": "BTC:clock-case", "instrument": "BTC-USDT-SWAP", "trade_agent_id": "trade-clock", "side": "long",
+              "entry": 80000.1, "stop_loss": 79000, "take_profit": 82000, "expires_at": exchange_now + 600,
+              "exit_at": exchange_now + 60_000, "verified_quote": {"funding_at": exchange_now + 100_000}}
+    rules = BinanceRules(D(".1"), D(".001"), D(".001"), D("10"), D("100"))
+    notices = []
+
+    class Exchange:
+        async def call(self, action, *args):
+            if action == "prepare":
+                return D("100")
+            if action == "position":
+                return None
+            if action == "fills":
+                return [
+                    {"orderId": 10, "side": "SELL", "qty": ".03", "price": "79900", "time": exchange_now - 500,
+                     "realizedPnl": "-10", "commission": ".05", "commissionAsset": "USDT"},
+                    {"orderId": 42, "side": "BUY", "qty": ".03", "price": "80000", "time": exchange_now,
+                     "realizedPnl": "0", "commission": ".05", "commissionAsset": "USDT"},
+                    {"orderId": 44, "side": "SELL", "qty": ".03", "price": "81000", "time": exchange_now + 500,
+                     "realizedPnl": "30", "commission": ".05", "commissionAsset": "USDT"},
+                ]
+            pytest.fail(f"Unexpected SDK action {action}")
+
+    class Market:
+        def now(self):
+            return exchange_now
+
+        async def quote(self, instrument):
+            return {"bid": 79999.9, "ask": 80000, "last": 80000, "mark": 80000,
+                    "ask_size": 2, "bid_size": 2, "ticker_at": exchange_now}
+
+    async def scenario():
+        with sqlite3.connect(tmp_path / "trades.sqlite") as connection:
+            ledger = TradeLedger(connection, "account")
+            ledger.add(signal)
+            worker = BinanceTrade(signal, {}, ledger, Exchange(), Market(), rules, notices.append, "demo")
+            assert await worker.step() is True
+            assert ledger.outcome(signal["id"])["status"] == "entry_expired"
+
+            settled_signal = signal | {"id": "BTC:settle-case", "expires_at": exchange_now + 10_000}
+            ledger.add(settled_signal)
+            order = {"orderId": 42, "status": "FILLED", "executedQty": ".03", "updateTime": exchange_now}
+            settler = BinanceTrade(settled_signal, {"entry_sent": exchange_now, "entry": order}, ledger,
+                                   Exchange(), Market(), rules, notices.append, "demo")
+            assert await settler.step() is True
+            outcome = ledger.outcome(settled_signal["id"])
+            assert outcome["status"] == "binance_closed" and outcome["pnl_usdt"] == 29.9
+
+    asyncio.run(scenario())

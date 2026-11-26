@@ -36,16 +36,22 @@ class BinanceMonitor(PerpetualMonitor):
     async def stream(self):
         await self.market.sync_clock(signing=self.settings.trading)
         self.tick = self.rules.tick
-        clock = await self.market.clock()
+        clock = self.market.now()
+        synced_at = clock
         self.skip_through = clock
         self.last_evaluated = 0
         self.bars, self.forming = {}, {}
         await self.refresh(clock - 1200, limit=HISTORY_LIMIT)
+        self.last_quote = await self.get_quote()
         self.status, self.market_note = "online", "币安永续行情已连接"
         self.evaluate()
         while True:
             await asyncio.sleep(2)
-            clock = await self.market.clock()
+            clock = self.market.now()
+            if clock - synced_at >= 600_000:
+                await self.market.sync_clock(signing=self.settings.trading)
+                clock = self.market.now()
+                synced_at = clock
             await self.refresh(clock - 1200, limit=3)
             self.evaluate()
             self.last_quote = await self.get_quote()
@@ -118,7 +124,11 @@ async def binance_monitors(directory, settings, on_signal, on_trade):
         directory.mkdir(parents=True, exist_ok=True)
         with (account_lock(directory / f"binance-{settings.mode}.lock.sqlite"),
               closing(sqlite3.connect(directory / f"binance-{settings.mode}.sqlite")) as database):
-            account = await BinanceFutures(settings).call("account")
+            probe = BinanceFutures(settings)
+            try:
+                account = await probe.call("account")
+            finally:
+                probe.close()
             ledger = TradeLedger(database, account)
             executor = BinanceExecutor(settings, market, rules, ledger, on_trade, model)
 

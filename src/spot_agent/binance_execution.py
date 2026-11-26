@@ -142,6 +142,8 @@ class BinanceTrade:
             await self.track()
         finally:
             await self.stop_advice()
+            if hasattr(self.sdk, "close"):
+                self.sdk.close()
 
     async def stop_advice(self):
         if self.advice is not None:
@@ -219,8 +221,9 @@ class BinanceTrade:
         low, high = sorted((d(self.signal["stop_loss"]), d(self.signal["take_profit"])))
         size_price = max(limit, ask, d(quote["mark"]))
         quantity = self.rules.quantity(limit, margin_budget * LEVERAGE, sizing_price=size_price)
-        remaining = min(5000, self.signal["expires_at"] - now_ms() - 800)
-        if remaining <= 0 or self.market.now() >= self.signal["expires_at"] - 500:
+        now = self.market.now()
+        remaining = min(5000, self.signal["expires_at"] - now - 800)
+        if remaining <= 0 or now >= self.signal["expires_at"] - 500:
             return self.finish({"status": "entry_expired"}, "失败", "报价核验结束时已过入场窗口。")
         if quantity is None:
             return self.finish({"status": "entry_rejected"}, "失败",
@@ -299,8 +302,12 @@ class BinanceTrade:
         start = self.state["entry_sent"] - 1500
         fills = await self.sdk.call("fills", self.symbol, start, self.market.now())
         entries = [fill for fill in fills if fill["orderId"] == order["orderId"]]
-        closes = [fill for fill in fills if fill["side"] == ("SELL" if self.long else "BUY")]
-        if sum(d(fill["qty"]) for fill in entries) != quantity or sum(d(fill["qty"]) for fill in closes) != quantity:
+        if sum(d(fill["qty"]) for fill in entries) != quantity:
+            return
+        opened_at = min(fill["time"] for fill in entries)
+        closes = [fill for fill in fills if fill["orderId"] != order["orderId"]
+                  and fill["time"] >= opened_at and fill["side"] == ("SELL" if self.long else "BUY")]
+        if sum(d(fill["qty"]) for fill in closes) != quantity:
             return
         triggered = {}
         for leg, client_id in self.protections.items():
