@@ -128,7 +128,7 @@ async def binance_monitors(directory, settings, on_signal, on_trade):
             try:
                 account = await probe.call("account")
             finally:
-                probe.close()
+                probe.close_session()
             ledger = TradeLedger(database, account)
             executor = BinanceExecutor(settings, market, rules, ledger, on_trade, model)
 

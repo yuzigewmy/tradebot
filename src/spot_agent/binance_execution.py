@@ -142,8 +142,8 @@ class BinanceTrade:
             await self.track()
         finally:
             await self.stop_advice()
-            if hasattr(self.sdk, "close"):
-                self.sdk.close()
+            if hasattr(self.sdk, "close_session"):
+                self.sdk.close_session()
 
     async def stop_advice(self):
         if self.advice is not None:

@@ -65,7 +65,7 @@ class BinanceFutures:
                                       timeout=3000, base_path=DEMO_URL if settings.mode == "demo" else LIVE_URL)
         self.api = DerivativesTradingUsdsFutures(config_rest_api=config).rest_api
 
-    def close(self):
+    def close_session(self):
         self.api._session.close()
 
     def request(self, method, /, *, missing=(), **kwargs):
