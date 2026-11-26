@@ -111,6 +111,7 @@ def test_trade_delivery_survives_restart_and_ignores_stale_early_notice(tmp_path
             try:
                 await asyncio.wait_for(sent.wait(), 2)
                 assert restored.trade_outbox[final.key]["delivered"] is True
+                assert restored.trade_outbox["trade-test:early_stop_loss"]["delivered"] is True
             finally:
                 await restored.close()
             final_restart = WechatBridge(ILink(session), store, None, None, None)

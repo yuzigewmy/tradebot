@@ -202,6 +202,7 @@ $("#import-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (busy) return;
   const file = $("#csv-file").files[0];
+  if (!file) { showError(new Error("请先选择 CSV 文件")); return; }
   if (file.size > 2000000) { showError(new Error("CSV文件最多2MB")); return; }
   setBusy(true, "正在解析CSV并按其历史截止时间分析…");
   try {

@@ -34,7 +34,7 @@ function metric(label, value) {
 }
 
 async function request(path = "", body) {
-  const response = await fetch(`/api/perpetual/${$("#instrument").value}${path}`, body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const response = await fetch(`/api/perpetual/${$("#instrument").value}${path}`, body === undefined ? {cache: "no-store"} : {method: "POST", cache: "no-store", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   const data = await response.json();
   if (!response.ok) throw new Error(data.error?.message ?? `本地监控接口返回 HTTP ${response.status}`);
   return data;

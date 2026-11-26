@@ -286,6 +286,8 @@ class WechatBridge:
                     if notice.expires_at is not None:
                         timeout = min(timeout, (notice.expires_at - now_ms()) / 1000)
                         if timeout <= 0 or f"{notice.agent_id}:closed" in self.trade_outbox:
+                            delivery["delivered"] = True
+                            dump(self.trade_path, self.trade_outbox)
                             continue
                     if delivery["owner"] is None:
                         delivery["owner"] = state.owner
