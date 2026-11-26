@@ -1,7 +1,15 @@
 const el = (id) => document.getElementById(id);
 const number = new Intl.NumberFormat("zh-CN", {maximumFractionDigits: 8});
+const cnyNumber = new Intl.NumberFormat("zh-CN", {minimumFractionDigits: 2, maximumFractionDigits: 2});
 const clock = new Intl.DateTimeFormat("zh-CN", {timeZone: "Asia/Shanghai", dateStyle: "short", timeStyle: "medium"});
 const format = (amount) => number.format(Number(amount));
+const formatCny = (amount, rate, showSign = false) => {
+  if (rate == null) return "CNY 汇率暂不可用";
+  const value = Number(amount) * Number(rate);
+  const abs = cnyNumber.format(Math.abs(value));
+  const prefix = value < 0 ? "-" : showSign && value > 0 ? "+" : "";
+  return `≈ ${prefix}¥${abs}`;
+};
 const money = (amount) => `${format(amount)} USDT`;
 const signed = (amount) => `${Number(amount) > 0 ? "+" : ""}${format(amount)}`;
 const pct = (amount) => amount == null ? "—" : `${Number(amount).toFixed(2)}%`;
@@ -35,14 +43,21 @@ function drawShock() {
   tone(el("shock-result"), result);
 }
 
-function renderSnapshot({mode, as_of: stamp, wallet, assets, positions, risk, order_plan: plan}) {
+function renderSnapshot({mode, as_of: stamp, wallet, assets, positions, risk, order_plan: plan, fx}) {
+  const rate = fx ? fx.usd_cny : null;
+  const fxNote = rate == null ? "" : ` · 1 USDT ≈ ${format(rate)} CNY`;
   el("account-source").textContent = mode === "live" ? "币安实盘 · U 本位合约" : "币安 Demo · U 本位合约";
-  el("snapshot-status").textContent = `更新于 ${time(stamp)} · 每 5 秒刷新`;
+  el("snapshot-status").textContent = `更新于 ${time(stamp)} · 每 5 秒刷新${fxNote}`;
   el("wallet-balance").textContent = format(wallet.wallet);
+  el("wallet-balance-cny").textContent = formatCny(wallet.wallet, rate);
   el("equity").textContent = format(wallet.equity);
+  el("equity-cny").textContent = formatCny(wallet.equity, rate);
   el("available").textContent = format(wallet.available);
+  el("available-cny").textContent = formatCny(wallet.available, rate);
   el("unrealized").textContent = signed(wallet.unrealized);
+  el("unrealized-cny").textContent = formatCny(wallet.unrealized, rate, true);
   tone(el("unrealized"), wallet.unrealized);
+  tone(el("unrealized-cny"), rate == null ? 0 : wallet.unrealized);
   el("used-margin").textContent = `${format(wallet.position_margin)} / ${money(wallet.order_margin)}`;
   el("margin-usage").textContent = pct(risk.margin_usage_pct);
   el("plan-label").textContent = `单笔逐仓预算 · 钱包余额 ${plan.margin_pct}%`;

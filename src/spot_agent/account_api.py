@@ -11,6 +11,7 @@ from binance_common.utils import send_request
 from fastapi import APIRouter, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
+import httpx
 
 from .binance_sdk import BinanceError, BinanceFutures, MARGIN_PERCENT
 from .perpetual_regime_terms import LEVERAGE
@@ -18,6 +19,8 @@ from .perpetual_regime_terms import LEVERAGE
 router = APIRouter(prefix="/api/account", tags=["账户"])
 BEIJING = ZoneInfo("Asia/Shanghai")
 INCOME_LIMIT = 1000
+FX_URL = "https://www.okx.com/api/v5/market/exchange-rate"
+FX_TTL = 60
 INCOME_GROUPS = {"REALIZED_PNL": "realized", "COMMISSION": "commission", "FUNDING_FEE": "funding",
                  "TRANSFER": "transfer", "INTERNAL_TRANSFER": "transfer", "CROSS_COLLATERAL_TRANSFER": "transfer"}
 NO_STORE = {"Cache-Control": "no-store", "Cross-Origin-Resource-Policy": "same-origin"}
@@ -79,20 +82,44 @@ def analyze_income(rows, days):
             "incomplete": len(rows) == INCOME_LIMIT}
 
 
+def fetch_usd_cny():
+    response = httpx.get(FX_URL, timeout=4.0)
+    response.raise_for_status()
+    rows = response.json()["data"]
+    rate = Decimal(rows[0]["usdCny"])
+    if rate <= 0:
+        raise ValueError("USD/CNY 汇率无效")
+    return {"usd_cny": rate, "as_of": time_ns() // 1_000_000, "source": "OKX"}
+
+
 class AccountReader:
     def __init__(self, settings):
         self.settings = settings
         self.cache = {}
-        self.locks = {key: asyncio.Lock() for key in ("snapshot", "income")}
+        self.locks = {key: asyncio.Lock() for key in ("snapshot", "income", "fx")}
+
+    async def read_fx(self):
+        async with self.locks["fx"]:
+            if "fx" in self.cache and monotonic() - self.cache["fx"][0] < FX_TTL:
+                return self.cache["fx"][1]
+            try:
+                fx = await asyncio.to_thread(fetch_usd_cny)
+            except (httpx.HTTPError, KeyError, IndexError, ValueError):
+                return None
+            self.cache["fx"] = (monotonic(), fx)
+            return fx
 
     async def read(self, section):
         ttl = 5 if section == "snapshot" else 60
         async with self.locks[section]:
             if section in self.cache and monotonic() - self.cache[section][0] < ttl:
-                return self.cache[section][1]
-            result = await asyncio.to_thread(self.fetch, section)
-            self.cache[section] = (monotonic(), result)
-            return result
+                result = self.cache[section][1]
+            else:
+                result = await asyncio.to_thread(self.fetch, section)
+                self.cache[section] = (monotonic(), result)
+        if section == "snapshot":
+            return {**result, "fx": await self.read_fx()}
+        return result
 
     def fetch(self, section):
         sdk = BinanceFutures(self.settings)

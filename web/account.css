@@ -5,6 +5,7 @@
 .wallet-summary > div + div, .income-summary > div + div { border-inline-start: 1px solid var(--line); }
 .account-main dt { color: var(--muted); font-size: 12px; }
 .wallet-summary dd { font: 600 24px/1.55 var(--mono); overflow-wrap: anywhere; }
+.wallet-summary .metric-cny { margin: 0 0 2px; color: var(--muted); font: 500 13px/1.45 var(--mono); }
 .wallet-summary .metric-note, .chart-header p { margin: 0; color: var(--muted); font: 12px/1.65 var(--font); }
 .account-analysis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 36px; margin-top: 20px; }
 .account-section { border-top: 1px solid var(--line); padding: 18px 0; }

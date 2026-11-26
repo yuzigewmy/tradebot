@@ -1,10 +1,13 @@
+import asyncio
 from datetime import datetime
 from decimal import Decimal
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import httpx
 
-from spot_agent.account_api import BEIJING, analyze_income, income_window, router, snapshot
+from spot_agent import account_api
+from spot_agent.account_api import AccountReader, BEIJING, analyze_income, income_window, router, snapshot
 
 
 def test_wallet_budget_and_hedged_exposure_use_different_account_fields():
@@ -55,3 +58,27 @@ def test_account_data_requires_local_same_origin_and_cannot_be_cached():
     response = local.get("/api/account", headers=headers)
     assert response.json() == {"wallet": "1.00000001"}
     assert response.headers["cache-control"] == "no-store"
+
+
+def test_account_reader_attaches_cached_fx_and_handles_fx_failure(monkeypatch):
+    reader = AccountReader(settings=None)
+    monkeypatch.setattr(reader, "fetch", lambda section: {"mode": "live", "as_of": 1, "wallet": {"wallet": Decimal("10")}})
+    calls = 0
+
+    def fake_fx():
+        nonlocal calls
+        calls += 1
+        return {"usd_cny": Decimal("6.664"), "as_of": 2, "source": "OKX"}
+
+    monkeypatch.setattr(account_api, "fetch_usd_cny", fake_fx)
+    first = asyncio.run(reader.read("snapshot"))
+    second = asyncio.run(reader.read("snapshot"))
+    assert first["fx"]["usd_cny"] == Decimal("6.664")
+    assert second["fx"]["usd_cny"] == Decimal("6.664")
+    assert calls == 1
+
+    reader_fail = AccountReader(settings=None)
+    monkeypatch.setattr(reader_fail, "fetch", lambda section: {"mode": "live", "as_of": 1})
+    monkeypatch.setattr(account_api, "fetch_usd_cny", lambda: (_ for _ in ()).throw(httpx.ConnectError("offline")))
+    failed = asyncio.run(reader_fail.read("snapshot"))
+    assert failed["fx"] is None
