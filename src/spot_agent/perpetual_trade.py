@@ -13,7 +13,7 @@ import aiohttp
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from .agent import AgentError, model_configured, response_text, responses_config
+from .agent import AgentError, astream_response, model_configured, response_text, responses_config
 from .perpetual_history import MINUTE, SECOND
 from .perpetual_market import MarketError, now_ms, parse_candle, public_data, quote
 from .perpetual_outcomes import entry_second
@@ -209,9 +209,7 @@ async def review_position(client, evidence):
                             "schema": PositionReview.model_json_schema()}},
     }
     async with asyncio.timeout(20):
-        response = await client.post(url, headers=headers, json=payload, timeout=20)
-    response.raise_for_status()
-    result = response.json()
+        result = await astream_response(client, url, headers, payload, 20)
     if result["status"] != "completed":
         raise AgentError("提前退出复核未完成")
     return PositionReview.model_validate_json(response_text(result["output"]))

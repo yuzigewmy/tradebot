@@ -53,6 +53,7 @@ def test_agent_reads_evidence_tools_before_returning_answer(monkeypatch):
         assert request.url.path == "/v1/responses"
         assert payload["reasoning"] == {"effort": "high"}
         assert payload["store"] is False
+        assert payload["stream"] is True
         assert payload["service_tier"] == "ultrafast"
         assert json.loads(payload["input"][0]["content"])["market"]["source"] == "synthetic"
         if len(requests) == 1:
@@ -62,7 +63,8 @@ def test_agent_reads_evidence_tools_before_returning_answer(monkeypatch):
             assert payload["input"][-1]["call_id"] == "call_one"
             answer = {"answer": "趋势证据需要结构配合，等待确认。", "counter_evidence": ["均线有滞后性。"], "evidence_ids": ["1h:trend"]}
             output = [{"type": "message", "content": [{"type": "output_text", "text": json.dumps(answer)}]}]
-        return httpx.Response(200, json={"output": output, "status": "completed", "model": "test-model", "service_tier": "ultrafast"})
+        event = {"type": "response.completed", "response": {"output": output, "status": "completed", "model": "test-model", "service_tier": "ultrafast"}}
+        return httpx.Response(200, headers={"Content-Type": "text/event-stream"}, text=f"event: response.completed\ndata: {json.dumps(event)}\n\n")
     client = httpx.Client(transport=httpx.MockTransport(model_response))
     monkeypatch.setattr("spot_agent.agent.httpx.Client", lambda: client)
     report = {"evidence": [{"id": "1h:trend", "text": "computed"}], "snapshot_id": "snapshot", "source": "synthetic", "exchange": "synthetic", "symbol": "BTC/USDT", "as_of": 1794960000000}

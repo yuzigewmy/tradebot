@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .agent import AgentError, response_text, responses_config
+from .agent import AgentError, astream_response, response_text, responses_config
 from .perpetual_strategy import PROFILES, candidate_issue, exits_touched, priced_candidate
 
 
@@ -58,9 +58,7 @@ async def review_setup(client, event, timeout, *, profile="v1"):
         "text": {"format": {"type": "json_schema", "name": "perpetual_review", "strict": True, "schema": SetupReview.model_json_schema()}},
     }
     async with asyncio.timeout(timeout):
-        response = await client.post(url, headers=headers, json=payload, timeout=timeout)
-    response.raise_for_status()
-    result = response.json()
+        result = await astream_response(client, url, headers, payload, timeout)
     if result["status"] != "completed":
         raise AgentError(f"模型研判未完成（{result['status']}）")
     answer = SetupReview.model_validate_json(response_text(result["output"]))

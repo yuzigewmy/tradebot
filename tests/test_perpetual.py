@@ -98,6 +98,7 @@ def test_review_publishes_exact_candidate_or_discards_on_expiry(tmp_path, monkey
     def model_reply(request):
         nonlocal now
         payload = json.loads(request.content)
+        assert payload["stream"] is True
         event = json.loads(payload["input"][0]["content"])["event"]
         candidate = event["execution"]["candidate"]
         assert "pullback_adx_15m_pass" in payload["instructions"]
@@ -107,9 +108,10 @@ def test_review_publishes_exact_candidate_or_discards_on_expiry(tmp_path, monkey
         if late:
             now = candidate["expires_at"]
         answer = {"decision": "confirm", "analysis": "方向一致。", "counter_evidence": "注意盘口变化。", "evidence_ids": ["setup", "execution"]}
-        return httpx.Response(200, json={"status": "completed", "model": "test-model", "output": [{
+        stream_event = {"type": "response.completed", "response": {"status": "completed", "model": "test-model", "output": [{
             "type": "message", "content": [{"type": "output_text", "text": json.dumps(answer)}],
-        }]})
+        }]}}
+        return httpx.Response(200, headers={"Content-Type": "text/event-stream"}, text=f"event: response.completed\ndata: {json.dumps(stream_event)}\n\n")
 
     monkeypatch.setenv("SPOT_LLM_BASE_URL", "https://model.example/v1")
     monkeypatch.setenv("SPOT_LLM_API_KEY", "test-only")

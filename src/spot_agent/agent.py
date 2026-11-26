@@ -42,6 +42,52 @@ def response_text(output):
     return "".join(part["text"] for item in output if item["type"] == "message" for part in item["content"] if part["type"] == "output_text")
 
 
+def _sse_completed(raw):
+    if raw == "[DONE]":
+        return None
+    event = json.loads(raw)
+    kind = event["type"]
+    if kind == "response.completed":
+        return event["response"]
+    if kind in ("response.failed", "response.incomplete", "error"):
+        raise AgentError(f"模型未完成响应（{kind}）")
+    return False
+
+
+def stream_response(client, url, headers, payload, timeout):
+    with client.stream("POST", url, headers=headers, json=payload | {"stream": True}, timeout=timeout) as response:
+        response.raise_for_status()
+        data = []
+        for line in response.iter_lines():
+            if line.startswith("data:"):
+                data.append(line[5:].lstrip(" "))
+            elif not line and data:
+                result = _sse_completed("\n".join(data))
+                data.clear()
+                if result is None:
+                    break
+                if result is not False:
+                    return result
+    raise AgentError("模型响应在完成前中断")
+
+
+async def astream_response(client, url, headers, payload, timeout):
+    async with client.stream("POST", url, headers=headers, json=payload | {"stream": True}, timeout=timeout) as response:
+        response.raise_for_status()
+        data = []
+        async for line in response.aiter_lines():
+            if line.startswith("data:"):
+                data.append(line[5:].lstrip(" "))
+            elif not line and data:
+                result = _sse_completed("\n".join(data))
+                data.clear()
+                if result is None:
+                    break
+                if result is not False:
+                    return result
+    raise AgentError("模型响应在完成前中断")
+
+
 def validate_answer(content, evidence_ids):
     answer = InsightAnswer.model_validate_json(content)
     if not set(answer.evidence_ids) <= set(evidence_ids):
@@ -87,9 +133,7 @@ def run_agent(report, question):
             if remaining <= 0:
                 raise AgentError("模型研判达到时间上限，未生成结果。")
             choice = {"type": "function", "name": "get_evidence"} if turn == 0 else "auto"
-            response = client.post(url, headers=headers, timeout=remaining, json=payload | {"input": inputs, "tool_choice": choice})
-            response.raise_for_status()
-            result = response.json()
+            result = stream_response(client, url, headers, payload | {"input": inputs, "tool_choice": choice}, remaining)
             if result["status"] != "completed":
                 raise AgentError(f"模型未完成研判（{result['status']}）。")
             output = result["output"]

@@ -157,13 +157,14 @@ async def trade_lifecycle(tmp_path, monkeypatch, *, market_touches_stop=False):
     def model_response(request):
         payload = json.loads(request.content)
         data = json.loads(payload["input"][0]["content"])
-        assert payload["store"] is False and payload["text"]["format"]["name"] == "perpetual_position_review"
+        assert payload["store"] is False and payload["stream"] is True and payload["text"]["format"]["name"] == "perpetual_position_review"
         assert data["agent_id"] == "trade-life" and data["proposed_action"] == "early_stop_loss"
         calls.append(data)
         reviewed.set()
         assert data["recent_closed_candles"][-1][4] == 97
         text = json.dumps({"decision": "early_stop_loss"})
-        return httpx.Response(200, json={"status": "completed", "output": [{"type": "message", "content": [{"type": "output_text", "text": text}]}]})
+        event = {"type": "response.completed", "response": {"status": "completed", "output": [{"type": "message", "content": [{"type": "output_text", "text": text}]}]}}
+        return httpx.Response(200, headers={"Content-Type": "text/event-stream"}, text=f"event: response.completed\ndata: {json.dumps(event)}\n\n")
 
     monkeypatch.setenv("SPOT_LLM_BASE_URL", "https://model.example/v1")
     monkeypatch.setenv("SPOT_LLM_API_KEY", "test-only")
