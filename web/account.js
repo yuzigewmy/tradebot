@@ -37,7 +37,7 @@ function fillRows(id, data) {
 
 function drawShock() {
   const percent = Number(el("shock").value);
-  const result = Number(currentRisk.shock_up) * percent;
+  const result = Number(currentRisk.shock_up) * percent || 0;
   el("shock-pct").textContent = `${signed(percent)}%`;
   el("shock-result").textContent = `${signed(result)} USDT`;
   tone(el("shock-result"), result);
