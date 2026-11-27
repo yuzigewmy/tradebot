@@ -3,6 +3,7 @@ const clock = new Intl.DateTimeFormat("zh-CN", {month: "2-digit", day: "2-digit"
 const price = new Intl.NumberFormat("zh-CN", {maximumFractionDigits: 8});
 const environments = {live: "币安实盘", demo: "币安 Demo", quotes: "币安行情", off: "OKX 模拟"};
 const strategies = {
+  dual_trend_engine: "S10 双引擎顺势（回踩 + 突破）",
   btc_trend_reclaim: "BTC 多周期均线确认", eth_compression_short: "ETH 30 分钟波动收缩做空",
   all: "回踩与突破", channel_breakout: "十五分钟区间突破", trend_pullback: "十五分钟趋势回踩",
 };
@@ -73,8 +74,12 @@ function renderSummary() {
   label("runtime-state", tradingState(health, count, markets));
   byId("execution-mode").textContent = environments[mode];
   byId("running-count").textContent = enabled ? `${count} / ${markets.length} 个合约运行中` : "当前环境用于研究";
-  byId("margin-budget").textContent = enabled ? `USDT 钱包余额的 ${markets[0].margin_percent}%` : "—";
+  const usesRisk = markets[0].risk_percent != null;
+  byId("margin-budget").textContent = !enabled ? "—"
+    : usesRisk ? `单笔止损风险 ${markets[0].risk_percent}%`
+    : `USDT 钱包余额的 ${markets[0].margin_percent}%`;
   byId("trade-leverage").textContent = enabled ? `${markets[0].leverage} 倍 · 逐仓` : "—";
+  byId("margin-budget").nextElementSibling.textContent = usesRisk ? "按止损距离动态计算仓位（上限 5×）" : "开仓前按当时余额计算";
   byId("margin-budget").nextElementSibling.hidden = !enabled;
   byId("trade-leverage").nextElementSibling.hidden = !enabled;
   const waitingForChat = wechat.connection === "online" && !wechat.has_context;

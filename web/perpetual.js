@@ -7,8 +7,10 @@ const periodNames = {"1m": "1m", "15m": "15m", "30m": "30m", "1h": "1H", "4h": "
 const sides = {long: "做多", short: "做空", mixed: "方向未一致"};
 const compressionStrategy = "eth_compression_short";
 const btcStrategy = "btc_trend_reclaim";
-const strategyPeriods = {[compressionStrategy]: "30m", [btcStrategy]: "1h"};
-const setups = {[btcStrategy]: "BTC 多周期均线确认", [compressionStrategy]: "30 分钟波动收缩做空", pullback: "旧版趋势回踩", breakout: "旧版收缩放量突破", trend_pullback: "十五分钟趋势回踩", channel_breakout: "十五分钟区间突破"};
+const dualStrategy = "dual_trend_engine";
+const strategyPeriods = {[dualStrategy]: "1h", [compressionStrategy]: "30m", [btcStrategy]: "1h"};
+const setups = {[dualStrategy]: "S10 双引擎顺势", [btcStrategy]: "BTC 多周期均线确认", [compressionStrategy]: "30 分钟波动收缩做空", pullback: "旧版趋势回踩", breakout: "旧版收缩放量突破", trend_pullback: "十五分钟趋势回踩", channel_breakout: "十五分钟区间突破"};
+const engines = {s4_pullback: "S4 顺势回踩", s3_keltner: "S3 通道突破"};
 const statusLabels = {stopped: "已停止", online: "行情在线", connecting: "连接中", reconnecting: "重连中", error: "监控异常"};
 const outcomeLabels = {
   take_profit: "成功 · 止盈", stop_loss: "失败 · 止损", time_limit: "到期退出",
@@ -55,9 +57,11 @@ function render() {
   const mode = snapshot.execution_mode;
   const marketLabel = {quotes: "币安行情", demo: "币安 Demo", live: "币安实盘"}[mode] ?? "OKX";
   const canTrade = mode === "demo" || mode === "live";
-  const sizing = `钱包余额 ${snapshot.margin_percent}% 逐仓 · ${snapshot.leverage} 倍`;
+  const sizing = snapshot.risk_percent != null
+    ? `单笔风险 ${snapshot.risk_percent}% 逐仓 · ${snapshot.leverage} 倍`
+    : `钱包余额 ${snapshot.margin_percent}% 逐仓 · ${snapshot.leverage} 倍`;
   const signalMode = binance ? `${marketLabel} · ${canTrade ? `自动下单 · ${sizing}` : "信号"}`
-    : fixedSignal ? "模拟信号 · 250 USDT 逐仓 · 30 倍"
+    : fixedSignal ? (snapshot.selected_strategy === dualStrategy ? "模拟信号 · 单笔风险 3% · 10 倍" : "模拟信号 · 250 USDT 逐仓 · 30 倍")
     : snapshot.model_configured ? "信号模式 · 仅复核合格候选" : "模型未配置";
   $("#exchange-label").textContent = `${marketLabel} · USDT 线性永续`;
   $("#execution-label").textContent = canTrade ? `${marketLabel} · 每个合约同时最多一仓`
@@ -65,7 +69,8 @@ function render() {
   $("#signal-result-label").textContent = canTrade ? "下单结果" : binance ? "信号结果" : "模拟结果";
   $('#review-mode [value="signals"]').textContent = canTrade ? "自动下单并推送" : "生成并推送信号";
   $("#stop-monitor").textContent = canTrade ? "停止开新仓" : "停止监控";
-  $("#strategy-select").disabled = binance || command;
+  $("#strategy-select").disabled = command;
+  syncInstrumentControls();
   $("#model-config").textContent = snapshot.mode === "observe" ? "观察模式 · 收盘评估" : signalMode;
   $("#start-monitor").textContent = snapshot.running ? "应用方式" : "启动监控";
   $("#start-monitor").disabled = command;
@@ -113,12 +118,16 @@ function renderChart() {
 function renderEvidence(fixedSignal) {
   const evaluation = snapshot.evaluation;
   const setup = evaluation?.setup;
+  const dual = snapshot.selected_strategy === dualStrategy;
   const btc = snapshot.selected_strategy === btcStrategy;
   const compression = snapshot.selected_strategy === compressionStrategy;
-  const title = setup?.strategy ? `${sides[setup.side]} · ${setups[setup.strategy]}` : btc ? "等待多空条件" : setup ? `${sides[setup.side]} · 等待条件` : "暂无收盘评估";
+  const engineTag = setup?.engine && engines[setup.engine] ? `（${engines[setup.engine]}）` : "";
+  const title = setup?.strategy ? `${sides[setup.side]} · ${setups[setup.strategy]}${engineTag}`
+    : dual ? (setup ? `${sides[setup.side]} · 等待双引擎触发` : "等待双引擎评估")
+    : btc ? "等待多空条件" : setup ? `${sides[setup.side]} · 等待条件` : "暂无收盘评估";
   $("#setup-title").textContent = title;
-  const timeframes = btc ? ["4h", "1h", "30m"] : compression ? ["1h", "30m", "1m"] : ["1h", "15m", "1m"];
-  $("#swap-context").replaceChildren(...(evaluation ? timeframes.map((tf) => {
+  const timeframes = dual ? ["4h", "1h", "15m"] : btc ? ["4h", "1h", "30m"] : compression ? ["1h", "30m", "1m"] : ["1h", "15m", "1m"];
+  $("#swap-context").replaceChildren(...(evaluation ? timeframes.filter((tf) => evaluation.context[tf]).map((tf) => {
     const values = evaluation.context[tf];
     const row = node("div");
     row.className = "cycle-row";
@@ -127,7 +136,21 @@ function renderEvidence(fixedSignal) {
   }) : []));
   const setupInfo = $("#setup-info");
   setupInfo.hidden = !setup;
-  if (setup && btc) {
+  if (setup && dual && setup.engines) {
+    setupInfo.replaceChildren(...setup.engines.map((item) => {
+      const trend = item.trend_pass ? "通过" : "等待";
+      if (item.engine === "s4_pullback") {
+        const pb = item.pullback_pass ? "通过" : "等待";
+        const trig = item.trigger_pass ? "通过" : "等待";
+        return metric(`${item.label} · 1H ${clock(item.closed_at)} 北京`,
+          `4H趋势 ${trend} · RSI回调 ${pb} · 复位触发 ${trig}（RSI ${item.rsi ?? "—"}）`);
+      }
+      const brk = item.breakout_pass ? "通过" : "等待";
+      const vol = item.volume_pass ? "通过" : "等待";
+      return metric(`${item.label} · 1H ${clock(item.closed_at)} 北京`,
+        `4H趋势 ${trend} · 通道突破 ${brk} · 量能 ${vol}（${item.volume_ratio}×）`);
+    }));
+  } else if (setup && btc) {
     setupInfo.replaceChildren(...setup.legs.map((leg) => {
       const trend = leg.trend_pass ? "通过" : "等待";
       const cross = leg.range_cross ? "通过" : "等待";
@@ -172,10 +195,14 @@ function renderSignals() {
     const active = snapshot.active_signal_id === latest.id;
     strip.dataset.active = String(active);
     $("#signal-status").textContent = active ? "已确认 · 参考价尚未到期" : "历史信号 · 开仓窗口不可用";
-    $("#signal-title").textContent = `${sides[latest.side]} · ${setups[latest.strategy]}`;
+    const latestEngine = latest.engine && engines[latest.engine] ? `（${engines[latest.engine]}）` : "";
+    $("#signal-title").textContent = `${sides[latest.side]} · ${setups[latest.strategy]}${latestEngine}`;
     const hold = latest.exit_at == null ? "" : ` · 持仓截止 ${clock(latest.exit_at)}`;
     let size = "";
-    if (latest.margin_percent !== undefined) {
+    if (latest.risk_percent !== undefined) {
+      size = ` · 单笔风险 ${latest.risk_percent}% × ${latest.leverage} 倍`;
+      if (latest.outcome.margin_budget !== undefined) size += ` · 保证金预算 ${price(latest.outcome.margin_budget)} USDT`;
+    } else if (latest.margin_percent !== undefined) {
       size = ` · 逐仓钱包余额的 ${latest.margin_percent}% × ${latest.leverage} 倍`;
       if (latest.outcome.margin_budget !== undefined) size += ` · 保证金预算 ${price(latest.outcome.margin_budget)} USDT`;
     } else if (latest.margin_budget !== undefined) {
@@ -241,10 +268,14 @@ function selectPeriod(value) {
 
 function syncInstrumentControls() {
   const eth = $("#instrument").value === "ETH-USDT-SWAP";
+  const binance = snapshot?.exchange === "Binance";
+  $(`#strategy-select [value="${dualStrategy}"]`).disabled = false;
   $(`#strategy-select [value="${compressionStrategy}"]`).disabled = !eth;
   $(`#strategy-select [value="${btcStrategy}"]`).disabled = eth;
-  $('[data-period="4h"]').hidden = eth;
-  if (eth && period === "4h") selectPeriod("15m");
+  for (const okxOnly of ["all", "channel_breakout", "trend_pullback"]) {
+    $(`#strategy-select [value="${okxOnly}"]`).disabled = binance;
+  }
+  $('[data-period="4h"]').hidden = false;
 }
 
 $("#instrument").addEventListener("change", () => {
