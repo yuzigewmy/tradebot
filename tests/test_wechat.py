@@ -182,6 +182,23 @@ def test_chat_answers_freely_and_uses_read_only_tool_for_followup(monkeypatch):
     asyncio.run(scenario())
 
 
+def test_wechat_monitor_status_reports_live_auto_trading_and_s10_details():
+    monitor = SimpleNamespace(
+        exchange="Binance", settings=SimpleNamespace(mode="live"),
+        running=True, mode="signals", selected_strategy="dual_trend_engine",
+        status="online", market_note="策略已计算最新收盘 K 线", evaluation={"closed_at": 1795744800000},
+    )
+    assistant = WechatResearch({"BTC-USDT-SWAP": monitor}, None)
+    result = asyncio.run(assistant.execute({"name": "monitor_status", "arguments": "{}"}))
+    btc = result["BTC-USDT-SWAP"]
+    assert btc["exchange"] == "Binance"
+    assert btc["execution_mode"] == "live"
+    assert btc["auto_trading"] is True
+    assert btc["strategy_name"] == "S10 双引擎顺势"
+    assert "S4" in btc["strategy_detail"] and "S3" in btc["strategy_detail"]
+    assert "3%" in btc["sizing"] and "10 倍" in btc["sizing"]
+
+
 def test_chat_does_not_publish_or_remember_partial_reply(monkeypatch):
     monkeypatch.setenv("SPOT_LLM_BASE_URL", "https://model.example/v1")
     monkeypatch.setenv("SPOT_LLM_API_KEY", "test-only")

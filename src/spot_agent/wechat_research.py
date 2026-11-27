@@ -82,7 +82,7 @@ TOOL_SCHEMAS = {
     "market_snapshot": (MarketArgs, "读取最新已收盘 K 线指标、结构和趋势证据，结果标明交易所。现货有日线、四小时、一小时。永续有一小时、十五分钟、一分钟。"),
     "perpetual_quote": (AssetArgs, "读取当前数据源的 USDT 永续最新成交价、买卖一档、标记价、资金费率及时间。"),
     "recent_signals": (SignalArgs, "查询 BTC、ETH 或两者最近的正式开仓信号、有效状态、开仓参考、止盈和止损。"),
-    "monitor_status": (NoArguments, "查询 BTC 与 ETH 永续监控是否运行、最新收盘时间和状态。"),
+    "monitor_status": (NoArguments, "查询 BTC 与 ETH 永续监控是否运行、交易所与执行环境（实盘/Demo/研究）、是否已开启自动下单、当前策略与风控参数及最新收盘时间。"),
     "backtest_summary": (BacktestArgs, "读取本地最近一次指定策略的永续模拟报告。查询组合时用 all，单独查询区间突破或趋势回踩时用对应策略。"),
 }
 TOOLS = [{"type": "function", "name": name, "description": description, "strict": True,
@@ -188,10 +188,28 @@ class WechatResearch:
                     instruments = self.monitors if args.asset == "all" else (f"{args.asset}-USDT-SWAP",)
                     return {"checked_at_beijing": time_label(now_ms()), "signals": {inst: self.recent(inst) for inst in instruments}}
                 case "monitor_status":
-                    return {inst: {"running": m.running, "mode": m.mode, "selected_strategy": m.selected_strategy,
-                                   "status": m.status, "note": m.market_note,
-                                   "last_close_beijing": time_label(m.evaluation["closed_at"]) if m.evaluation else None}
-                            for inst, m in self.monitors.items()}
+                    status_map = {}
+                    for inst, m in self.monitors.items():
+                        exec_mode = getattr(getattr(m, "settings", None), "mode", "off")
+                        auto_trading = bool(exec_mode in ("demo", "live") and m.running and m.mode == "signals")
+                        item = {
+                            "exchange": getattr(m, "exchange", "OKX"),
+                            "execution_mode": exec_mode,
+                            "auto_trading": auto_trading,
+                            "running": m.running, "mode": m.mode,
+                            "selected_strategy": m.selected_strategy,
+                            "strategy_name": STRATEGIES.get(m.selected_strategy, m.selected_strategy),
+                            "status": m.status, "note": m.market_note,
+                            "last_close_beijing": time_label(m.evaluation["closed_at"]) if m.evaluation else None,
+                        }
+                        if m.selected_strategy == "dual_trend_engine":
+                            item["strategy_detail"] = "S10 双引擎顺势：4H 趋势过滤 + 1H S4 顺势回踩(RSI复位) 与 S3 Keltner 通道突破，多空对称，单笔止损风险 3%，10 倍逐仓，最长持仓 48 小时并带保本/移动止损"
+                        if exec_mode in ("demo", "live"):
+                            item["sizing"] = ("单笔止损风险 3% × 10 倍逐仓（名义敞口上限 5 倍）"
+                                              if m.selected_strategy == "dual_trend_engine"
+                                              else "钱包余额 25% × 30 倍逐仓")
+                        status_map[inst] = item
+                    return status_map
                 case "backtest_summary":
                     return self.backtest(args.strategy)
         except (MarketError, aiohttp.ClientError, ccxt.BaseError, TimeoutError, json.JSONDecodeError) as error:
