@@ -309,6 +309,8 @@ class WechatBridge:
                     delivery["delivered"] = True
                     dump(self.trade_path, self.trade_outbox)
                     self.delivery = {"at": now_ms(), "status": "sent", "instrument": notice.instrument}
+                    if notice.agent_id == "system":
+                        self.conversation.append((f"[系统通知：{notice.title}]", notice.text))
             try:
                 await asyncio.wait_for(self.trade_ready.wait(), 5)
             except TimeoutError:
