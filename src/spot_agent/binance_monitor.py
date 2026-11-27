@@ -12,7 +12,7 @@ from .binance_market import BinanceMarket
 from .binance_sdk import MARGIN_PERCENT, BinanceFutures
 from .perpetual_btc import BTC_INSTRUMENT, BTC_STRATEGY
 from .perpetual_compression import COMPRESSION_INSTRUMENT, COMPRESSION_STRATEGY
-from .perpetual_dual import DUAL_LEVERAGE, DUAL_RISK_PERCENT, DUAL_STRATEGY, dual_signal_candidate
+from .perpetual_dual import DUAL_STRATEGY, dual_signal_candidate
 from .perpetual_market import HISTORY_LIMIT, MarketError
 from .perpetual_monitor import PerpetualMonitor, SignalJournal
 from .perpetual_regime_terms import LEVERAGE, fixed_signal_candidate
@@ -106,12 +106,8 @@ class BinanceMonitor(PerpetualMonitor):
 
     def view(self):
         result = super().view()
-        if self.selected_strategy == DUAL_STRATEGY:
-            result.update(execution_mode=self.settings.mode, risk_percent=float(DUAL_RISK_PERCENT),
-                          leverage=int(DUAL_LEVERAGE), margin_percent=None)
-        else:
-            result.update(execution_mode=self.settings.mode, margin_percent=MARGIN_PERCENT,
-                          leverage=int(LEVERAGE), risk_percent=None)
+        result.update(execution_mode=self.settings.mode, margin_percent=MARGIN_PERCENT,
+                      leverage=int(LEVERAGE), risk_percent=None)
         for signal in result["signals"]:
             signal["outcome"] = (self.ledger.status(signal["id"]) if self.ledger is not None else {"status": "public_signal"})
         return result

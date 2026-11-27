@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from .agent import AgentError, astream_response, model_configured, responses_config
 from .contracts import AnalyzeInput, TIMEFRAMES
-from .perpetual_dual import DUAL_LEVERAGE, DUAL_MAX_NOTIONAL_MULTIPLE, DUAL_MAX_STOP_PCT, DUAL_RISK_PERCENT
+from .perpetual_dual import DUAL_LEVERAGE, DUAL_MARGIN_PERCENT, DUAL_MAX_STOP_PCT
 from .perpetual_market import MarketError, closed_windows, now_ms
 from .perpetual_strategy import detect_trend_setup
 from .service import ROOT, analyze
@@ -206,13 +206,11 @@ class WechatResearch:
                         if m.selected_strategy == "dual_trend_engine":
                             item["strategy_detail"] = (
                                 f"S10 双引擎顺势：4H 趋势过滤 + 1H S4 顺势回踩(RSI复位) 与 S3 Keltner 通道突破，多空对称，"
-                                f"单笔止损风险 {DUAL_RISK_PERCENT}%，{int(DUAL_LEVERAGE)} 倍逐仓，"
+                                f"固定钱包余额 {DUAL_MARGIN_PERCENT}% 保证金 × {int(DUAL_LEVERAGE)} 倍逐仓（名义敞口 {DUAL_MARGIN_PERCENT * int(DUAL_LEVERAGE) / 100:g} 倍），"
                                 f"止损上限 {DUAL_MAX_STOP_PCT * 100:.1f}%（严守强平安全垫），最长持仓 48 小时并带保本/移动止损"
                             )
                         if exec_mode in ("demo", "live"):
-                            item["sizing"] = (f"单笔止损风险 {DUAL_RISK_PERCENT}% × {int(DUAL_LEVERAGE)} 倍逐仓（名义敞口上限 {DUAL_MAX_NOTIONAL_MULTIPLE} 倍）"
-                                              if m.selected_strategy == "dual_trend_engine"
-                                              else "钱包余额 25% × 30 倍逐仓")
+                            item["sizing"] = f"钱包余额 {DUAL_MARGIN_PERCENT}% × {int(DUAL_LEVERAGE)} 倍逐仓"
                         status_map[inst] = item
                     return status_map
                 case "backtest_summary":

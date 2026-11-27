@@ -4,7 +4,7 @@ import numpy as np
 from spot_agent.binance_market import BinanceRules
 from spot_agent.contracts import TIMEFRAMES
 from spot_agent.perpetual_dual import (
-    DUAL_COOLDOWN_MINUTES, DUAL_LEVERAGE, DUAL_RISK_PERCENT, DUAL_STRATEGY,
+    DUAL_COOLDOWN_MINUTES, DUAL_LEVERAGE, DUAL_MARGIN_PERCENT, DUAL_STRATEGY,
     dual_engine_setup, dual_signal_candidate,
 )
 
@@ -46,7 +46,8 @@ def test_dual_engine_triggers_s4_pullback_and_prices_48h_candidate():
     assert issue is None
     assert cand["strategy"] == DUAL_STRATEGY and cand["engine"] == "s4_pullback"
     assert cand["leverage"] == int(DUAL_LEVERAGE)
-    assert cand["risk_percent"] == float(DUAL_RISK_PERCENT)
+    assert cand["margin_percent"] == DUAL_MARGIN_PERCENT
+    assert "risk_percent" not in cand
     assert cand["cooldown_minutes"] == DUAL_COOLDOWN_MINUTES
     # Must NOT cut off 2 minutes before funding settlement (48h full hold)
     assert cand["exit_at"] == end + TIMEFRAMES["1m"] + 48 * TIMEFRAMES["1h"]

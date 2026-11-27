@@ -61,7 +61,7 @@ function render() {
     ? `单笔风险 ${snapshot.risk_percent}% 逐仓 · ${snapshot.leverage} 倍`
     : `钱包余额 ${snapshot.margin_percent}% 逐仓 · ${snapshot.leverage} 倍`;
   const signalMode = binance ? `${marketLabel} · ${canTrade ? `自动下单 · ${sizing}` : "信号"}`
-    : fixedSignal ? (snapshot.selected_strategy === dualStrategy ? "模拟信号 · 单笔风险 8% · 30 倍" : "模拟信号 · 250 USDT 逐仓 · 30 倍")
+    : fixedSignal ? "模拟信号 · 250 USDT 逐仓 · 30 倍"
     : snapshot.model_configured ? "信号模式 · 仅复核合格候选" : "模型未配置";
   $("#exchange-label").textContent = `${marketLabel} · USDT 线性永续`;
   $("#execution-label").textContent = canTrade ? `${marketLabel} · 每个合约同时最多一仓`

@@ -11,15 +11,14 @@ from .contracts import TIMEFRAMES
 from .perpetual_history import MINUTE, SECOND
 from .perpetual_paper import FEE_RATE, SLIPPAGE, PaperAccount, d
 from .perpetual_regime import Brackets, indicators, rolling, shift
-from .perpetual_regime_terms import CAPITAL, ENTRY_ISSUES, FIXED_ENTRY_WINDOW, FixedSignalPolicy, adverse_tick
+from .perpetual_regime_terms import CAPITAL, ENTRY_ISSUES, FIXED_ENTRY_WINDOW, LEVERAGE, MARGIN, FixedSignalPolicy, adverse_tick
 
 DUAL_STRATEGY = "dual_trend_engine"
 DUAL_VERSION = "perpetual-dual-engine/v1"
 DUAL_INSTRUMENTS = ("BTC-USDT-SWAP", "ETH-USDT-SWAP")
 
-DUAL_RISK_PERCENT = Decimal("8")
-DUAL_LEVERAGE = Decimal("30")
-DUAL_MAX_NOTIONAL_MULTIPLE = Decimal("15")
+DUAL_MARGIN_PERCENT = 25
+DUAL_LEVERAGE = LEVERAGE
 DUAL_COOLDOWN_MINUTES = 120
 DUAL_MIN_STOP_PCT = 0.004
 DUAL_MAX_STOP_PCT = 0.024
@@ -33,8 +32,7 @@ DUAL_POLICY_ID = hashlib.sha256(json.dumps({
     "version": DUAL_VERSION,
     "s4": {"brackets": asdict(S4_BRACKETS), "breakeven_r": S4_BREAKEVEN_R, "adx_min": 18, "rsi_band": [42, 45, 55, 58]},
     "s3": {"brackets": asdict(S3_BRACKETS), "breakeven_r": S3_BREAKEVEN_R, "adx_min": 20, "kc_mult": 2.0, "min_volume": 1.1},
-    "risk_percent": str(DUAL_RISK_PERCENT), "leverage": str(DUAL_LEVERAGE),
-    "max_notional_multiple": str(DUAL_MAX_NOTIONAL_MULTIPLE),
+    "margin_percent": DUAL_MARGIN_PERCENT, "leverage": str(DUAL_LEVERAGE),
     "stop_range": [DUAL_MIN_STOP_PCT, DUAL_MAX_STOP_PCT],
     "cooldown_minutes": DUAL_COOLDOWN_MINUTES, "entry_window": FIXED_ENTRY_WINDOW,
 }, sort_keys=True).encode()).hexdigest()[:12]
@@ -168,8 +166,7 @@ def dual_signal_candidate(instrument, setup, market_quote, rules, now, *, binanc
         "risk_per_unit": float(risk), "net_reward_risk": round(float(reward / risk), 4),
         "funding_cost_rate": 0.0, "policy_id": DUAL_POLICY_ID, "policy_version": DUAL_VERSION,
         "entry_reference": f"best_{entry_side}", "exit_reference": "last_trade",
-        "risk_percent": float(DUAL_RISK_PERCENT), "leverage": int(DUAL_LEVERAGE),
-        "max_notional_multiple": float(DUAL_MAX_NOTIONAL_MULTIPLE),
+        "margin_percent": DUAL_MARGIN_PERCENT, "leverage": int(DUAL_LEVERAGE),
         "cooldown_minutes": DUAL_COOLDOWN_MINUTES,
     }
     if binance:
@@ -177,8 +174,7 @@ def dual_signal_candidate(instrument, setup, market_quote, rules, now, *, binanc
             return None, "币安最新成交价已越过退出价位"
         return candidate, None
 
-    account = PaperAccount({instrument: rules}, cash=CAPITAL, leverage=DUAL_LEVERAGE,
-                           risk_fraction=DUAL_RISK_PERCENT / Decimal("100"))
+    account = PaperAccount({instrument: rules}, cash=CAPITAL, leverage=DUAL_LEVERAGE, fixed_margin=MARGIN)
     state = account.enter(instrument, candidate, market_quote | {entry_side: entry}, now)
     if state != "entered":
         return None, ENTRY_ISSUES[state]
