@@ -15,8 +15,8 @@ from .binance_market import SYMBOLS
 from .contracts import TIMEFRAMES
 from .binance_sdk import BinanceError, BinanceFutures
 from .perpetual_market import MarketError, now_ms
-from .perpetual_paper import d
-from .perpetual_regime_terms import LEVERAGE
+from .perpetual_paper import FEE_RATE, SLIPPAGE, d
+from .perpetual_regime_terms import LEVERAGE, adverse_tick
 from .perpetual_trade import REVIEW_ERRORS, TradeAgent, TradeNotice, time_label
 
 log = logging.getLogger(__name__)
@@ -124,6 +124,11 @@ class BinanceTrade:
         self.protections = {leg: f"{self.prefix}-{leg}" for leg in ("stop", "target")}
         self.label = f"币安{' Demo' if mode == 'demo' else '实盘'} {self.symbol} {'做多' if self.long else '做空'}"
 
+    def protection_ids(self):
+        rev = self.state.get("stop_rev")
+        stop_id = f"{self.prefix}-stop-r{rev}" if rev else self.protections["stop"]
+        return {"stop": stop_id, "target": self.protections["target"]}
+
     def save(self, **fields):
         self.state.update(fields)
         self.ledger.save(self.signal["id"], self.state)
@@ -195,10 +200,12 @@ class BinanceTrade:
             raise BinanceError("币安仓位与本次成交不符，请检查账户是否有其他交易")
         if self.state.get("close_reason") or self.market.now() >= self.signal["exit_at"]:
             return await self.close_position(abs(position_qty), self.state.get("close_reason", "到达策略持仓截止时间"))
-        stop, liquidation = d(self.signal["stop_loss"]), d(position["liquidationPrice"])
+        stop, liquidation = d(self.state.get("active_stop", self.signal["stop_loss"])), d(position["liquidationPrice"])
         if liquidation > 0 and (stop <= liquidation if self.long else stop >= liquidation):
             return await self.close_position(abs(position_qty), "实际强平价已越过计划止损")
         await self.protect(position, abs(position_qty))
+        if self.state.get("protected") and not self.state.get("close_reason"):
+            await self.maybe_trail_stop(position, abs(position_qty))
         if (self.state.get("protected") and not self.state.get("close_reason")
                 and self.advice is None and self.model is not None and model_configured()):
             record = self.signal | {"entry": float(position["entryPrice"]), "published_at": order["updateTime"],
@@ -209,18 +216,26 @@ class BinanceTrade:
     async def submit_entry(self):
         if self.market.now() >= self.signal["expires_at"]:
             return self.finish({"status": "entry_expired"}, "失败", "已过入场窗口。")
+        limit = d(self.signal["entry"])
         try:
-            margin_budget = await self.sdk.call("prepare", self.symbol)
+            if "risk_percent" in self.signal:
+                unit_risk = abs(limit - d(self.signal["stop_loss"])) / limit + 2 * (FEE_RATE + SLIPPAGE)
+                margin_budget, notional_budget = await self.sdk.call(
+                    "prepare_risk", self.symbol, int(self.signal["leverage"]),
+                    unit_risk, d(self.signal["risk_percent"]), d(self.signal["max_notional_multiple"]),
+                )
+            else:
+                margin_budget = await self.sdk.call("prepare", self.symbol)
+                notional_budget = margin_budget * LEVERAGE
         except BinanceError as exc:
             if exc.unknown or exc.retry_after is not None:
                 raise
             return self.finish({"status": "entry_rejected"}, "失败", f"下单前核验失败（{exc}）。")
         quote = await self.market.quote(self.signal["instrument"])
-        limit = d(self.signal["entry"])
         bid, ask, last = (d(quote[key]) for key in ("bid", "ask", "last"))
         low, high = sorted((d(self.signal["stop_loss"]), d(self.signal["take_profit"])))
         size_price = max(limit, ask, d(quote["mark"]))
-        quantity = self.rules.quantity(limit, margin_budget * LEVERAGE, sizing_price=size_price)
+        quantity = self.rules.quantity(limit, notional_budget, sizing_price=size_price)
         now = self.market.now()
         remaining = min(5000, self.signal["expires_at"] - now - 800)
         if remaining <= 0 or now >= self.signal["expires_at"] - 500:
@@ -245,12 +260,12 @@ class BinanceTrade:
 
     async def protect(self, position, quantity):
         assigned = self.state.get("brackets", {})
-        for leg, client_id in self.protections.items():
+        for leg, client_id in self.protection_ids().items():
             previous = assigned.get(leg)
             if previous is None:
                 assigned = assigned | {leg: now_ms()}
                 self.save(brackets=assigned)
-                trigger = d(self.signal["stop_loss" if leg == "stop" else "take_profit"])
+                trigger = d(self.state.get("active_stop", self.signal["stop_loss"]) if leg == "stop" else self.signal["take_profit"])
                 try:
                     order = await self.sdk.call("protect", self.symbol, self.long, trigger, leg, client_id)
                 except BinanceError as exc:
@@ -271,7 +286,52 @@ class BinanceTrade:
             sizing = f"保证金预算 {budget} USDT。" if budget is not None else ""
             self.notice("protected", "成功", f"实际开仓均价 {position['entryPrice']} USDT，数量 {quantity}。{sizing}"
                         f"止盈 {self.signal['take_profit']}，止损 {self.signal['stop_loss']}，保护单均已挂好。")
-            self.save(protected=True)
+            self.save(protected=True, active_stop=float(self.signal["stop_loss"]), best_price=float(position["entryPrice"]))
+
+    async def maybe_trail_stop(self, position, quantity):
+        be_r = self.signal.get("breakeven_r", 0)
+        trail_mult = self.signal.get("trailing_atr", 0)
+        if not be_r and not trail_mult:
+            return
+        mark_raw = position.get("markPrice")
+        if not mark_raw:
+            return
+        sign = 1 if self.long else -1
+        entry = d(position["entryPrice"])
+        mark = d(mark_raw)
+        best = d(self.state.get("best_price", entry))
+        if sign * (mark - best) > 0:
+            best = mark
+            self.save(best_price=float(best))
+        init_risk = abs(entry - d(self.signal["stop_loss"]))
+        atr = d(self.signal["atr"])
+        cur_stop = d(self.state.get("active_stop", self.signal["stop_loss"]))
+        desired = cur_stop
+        if be_r and sign * (best - entry) >= d(be_r) * init_risk:
+            be_stop = adverse_tick(entry * (1 + sign * (2 * FEE_RATE + SLIPPAGE)), sign, self.rules.tick, 0)
+            if sign * (be_stop - desired) > 0:
+                desired = be_stop
+        if trail_mult:
+            trail_stop = adverse_tick(best - sign * d(trail_mult) * atr, -sign, self.rules.tick, 0)
+            if sign * (trail_stop - desired) > 0:
+                desired = trail_stop
+        min_step = max(self.rules.tick, atr * Decimal("0.15"))
+        if sign * (desired - cur_stop) < min_step or sign * (mark - desired) <= min_step:
+            return
+        old_id = self.protection_ids()["stop"]
+        await self.sdk.call("cancel", old_id)
+        rev = self.state.get("stop_rev", 0) + 1
+        new_id = f"{self.prefix}-stop-r{rev}"
+        brackets = self.state.get("brackets", {}) | {"stop": now_ms()}
+        self.save(stop_rev=rev, active_stop=float(desired), brackets=brackets)
+        try:
+            await self.sdk.call("protect", self.symbol, self.long, desired, "stop", new_id)
+        except BinanceError as exc:
+            if exc.unknown:
+                raise
+            return await self.close_position(quantity, f"移动止损挂单被拒绝（{exc}）")
+        verb = "上移" if self.long else "下移"
+        self.notice(f"trail_{rev}", "成功", f"止损已{verb}至 {desired:f} USDT 锁定保护（当前标记价 {mark:f}）。")
 
     async def close_position(self, quantity, reason):
         await self.stop_advice()
@@ -293,7 +353,7 @@ class BinanceTrade:
         except BinanceError as exc:
             if exc.code == -2022:
                 # Binance can reject a reduce-only order that conflicts with existing exits.
-                for leg, client_id in self.protections.items():
+                for leg, client_id in self.protection_ids().items():
                     if leg in self.state.get("brackets", {}):
                         await self.sdk.call("cancel", client_id)
             raise
@@ -310,7 +370,7 @@ class BinanceTrade:
         if sum(d(fill["qty"]) for fill in closes) != quantity:
             return
         triggered = {}
-        for leg, client_id in self.protections.items():
+        for leg, client_id in self.protection_ids().items():
             if leg not in self.state.get("brackets", {}):
                 continue
             algo = await self.sdk.call("algo", client_id)

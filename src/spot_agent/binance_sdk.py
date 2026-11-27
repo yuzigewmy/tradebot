@@ -137,6 +137,30 @@ class BinanceFutures:
             raise BinanceError(f"{symbol} 杠杆档位不足以覆盖计划名义额")
         return margin_budget
 
+    def prepare_risk(self, symbol, leverage, unit_risk, risk_percent, max_notional_multiple):
+        if (self.position(symbol) or self.request("current_all_open_orders", symbol=symbol)
+                or self.request("current_all_algo_open_orders", symbol=symbol)):
+            raise BinanceError(f"{symbol} 存在非本执行器管理的仓位或订单")
+        balance = self.balance()
+        wallet = Decimal(balance["balance"])
+        if wallet <= 0:
+            raise BinanceError("币安 USDT 钱包余额不足")
+        notional_budget = min(wallet * risk_percent / Decimal(100) / unit_risk, wallet * max_notional_multiple)
+        margin_budget = notional_budget / Decimal(leverage)
+        if Decimal(balance["availableBalance"]) < margin_budget:
+            raise BinanceError(f"可用 USDT 余额不足，无法覆盖 {margin_budget:.4f} USDT 保证金预算")
+        config, = self.request("symbol_configuration", symbol=symbol)
+        if config["isAutoAddMargin"]:
+            raise BinanceError(f"{symbol} 需在币安关闭自动追加保证金")
+        if config["marginType"] != "ISOLATED":
+            self.request("change_margin_type", symbol=symbol, margin_type=enums.ChangeMarginTypeMarginTypeEnum.ISOLATED,
+                         missing=(-4046,))
+        if config["leverage"] != int(leverage):
+            config = self.request("change_initial_leverage", symbol=symbol, leverage=int(leverage))
+        if Decimal(config["maxNotionalValue"]) < notional_budget:
+            raise BinanceError(f"{symbol} 杠杆档位不足以覆盖计划名义额")
+        return margin_budget, notional_budget
+
     def enter(self, symbol, long, price, quantity, client_id, window):
         return self.request("new_order", symbol=symbol, side=enums.NewOrderSideEnum("BUY" if long else "SELL"),
                             type=enums.NewOrderTypeEnum.LIMIT, time_in_force=enums.NewOrderTimeInForceEnum.IOC,

@@ -12,11 +12,16 @@ from .binance_market import BinanceMarket
 from .binance_sdk import MARGIN_PERCENT, BinanceFutures
 from .perpetual_btc import BTC_INSTRUMENT, BTC_STRATEGY
 from .perpetual_compression import COMPRESSION_INSTRUMENT, COMPRESSION_STRATEGY
+from .perpetual_dual import DUAL_LEVERAGE, DUAL_RISK_PERCENT, DUAL_STRATEGY, dual_signal_candidate
 from .perpetual_market import HISTORY_LIMIT, MarketError
 from .perpetual_monitor import PerpetualMonitor, SignalJournal
 from .perpetual_regime_terms import LEVERAGE, fixed_signal_candidate
 
-STRATEGIES = {BTC_INSTRUMENT: BTC_STRATEGY, COMPRESSION_INSTRUMENT: COMPRESSION_STRATEGY}
+STRATEGIES = {BTC_INSTRUMENT: DUAL_STRATEGY, COMPRESSION_INSTRUMENT: DUAL_STRATEGY}
+ALLOWED_STRATEGIES = {
+    BTC_INSTRUMENT: (DUAL_STRATEGY, BTC_STRATEGY),
+    COMPRESSION_INSTRUMENT: (DUAL_STRATEGY, COMPRESSION_STRATEGY),
+}
 
 
 class BinanceMonitor(PerpetualMonitor):
@@ -28,9 +33,9 @@ class BinanceMonitor(PerpetualMonitor):
         self.selected_strategy = STRATEGIES[instrument]
 
     def start(self, mode, strategy="all"):
-        wanted = STRATEGIES[self.instrument]
-        if strategy not in ("all", wanted):
-            raise ValueError("币安监控使用该合约的固定策略")
+        wanted = STRATEGIES[self.instrument] if strategy == "all" else strategy
+        if wanted not in ALLOWED_STRATEGIES[self.instrument]:
+            raise ValueError("币安监控不支持该合约所选策略")
         super().start(mode, wanted)
 
     async def stream(self):
@@ -79,6 +84,8 @@ class BinanceMonitor(PerpetualMonitor):
         return await self.market.candles(self.instrument, timeframe, await self.market.clock() - 1200)
 
     def fixed_candidate(self, policy, setup, market_quote, published_at):
+        if policy.strategy == DUAL_STRATEGY:
+            return dual_signal_candidate(self.instrument, setup, market_quote, self.rules, published_at, binance=True)
         candidate, issue = fixed_signal_candidate(policy, setup, market_quote, self.rules, published_at, binance=True)
         if candidate is None:
             return None, issue
@@ -99,7 +106,12 @@ class BinanceMonitor(PerpetualMonitor):
 
     def view(self):
         result = super().view()
-        result.update(execution_mode=self.settings.mode, margin_percent=MARGIN_PERCENT, leverage=int(LEVERAGE))
+        if self.selected_strategy == DUAL_STRATEGY:
+            result.update(execution_mode=self.settings.mode, risk_percent=float(DUAL_RISK_PERCENT),
+                          leverage=int(DUAL_LEVERAGE), margin_percent=None)
+        else:
+            result.update(execution_mode=self.settings.mode, margin_percent=MARGIN_PERCENT,
+                          leverage=int(LEVERAGE), risk_percent=None)
         for signal in result["signals"]:
             signal["outcome"] = (self.ledger.status(signal["id"]) if self.ledger is not None else {"status": "public_signal"})
         return result

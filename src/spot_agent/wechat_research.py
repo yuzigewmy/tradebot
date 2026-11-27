@@ -25,7 +25,9 @@ MINUTE = TIMEFRAMES["1m"]
 SIDES = {"long": "做多", "short": "做空"}
 STRATEGIES = {"pullback": "旧版趋势回踩", "breakout": "旧版收缩放量突破",
               "trend_pullback": "十五分钟趋势回踩", "channel_breakout": "十五分钟区间突破",
-              "eth_compression_short": "30 分钟波动收缩做空", "btc_trend_reclaim": "BTC 多周期均线确认"}
+              "eth_compression_short": "30 分钟波动收缩做空", "btc_trend_reclaim": "BTC 多周期均线确认",
+              "dual_trend_engine": "S10 双引擎顺势"}
+ENGINES = {"s4_pullback": "S4 顺势回踩", "s3_keltner": "S3 通道突破"}
 
 
 def time_label(ts):
@@ -39,13 +41,16 @@ def signal_message(signal):
     exchange = signal.get("exchange", "OKX")
     if exchange == "Binance":
         mode = {"quotes": "行情", "demo": "Demo", "live": "实盘"}[signal["execution_mode"]]
-        if "margin_percent" in signal:
+        if "risk_percent" in signal:
+            position = f"\n计划逐仓　单笔风险 {signal['risk_percent']:g}% × {signal['leverage']} 倍"
+        elif "margin_percent" in signal:
             position = f"\n计划逐仓　钱包余额的 {signal['margin_percent']}% × {signal['leverage']} 倍"
         else:
             position = f"\n计划逐仓　{signal['margin_budget']} USDT × {signal['leverage']} 倍"
         exchange = f"币安 {mode}"
+    engine = f"（{ENGINES[signal['engine']]}）" if signal.get("engine") in ENGINES else ""
     return (f"【{exchange} 永续开仓信号】\n{signal['instrument']} · {SIDES[signal['side']]}\n"
-            f"策略　{STRATEGIES[signal['strategy']]}\n"
+            f"策略　{STRATEGIES[signal['strategy']]}{engine}\n"
             f"开仓参考　{signal['entry']} USDT\n"
             f"止盈　{signal['take_profit']} USDT\n"
             f"止损　{signal['stop_loss']} USDT\n"

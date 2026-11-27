@@ -15,6 +15,8 @@ from .agent import AgentError, model_configured
 from .contracts import TIMEFRAMES
 from .perpetual_btc import BTC_INSTRUMENT, BTC_POLICY, BTC_STRATEGY, live_btc_setup
 from .perpetual_compression import COMPRESSION_POLICY, COMPRESSION_STRATEGY, compression_setup
+from .perpetual_dual import (DUAL_COOLDOWN_MINUTES, DUAL_POLICY, DUAL_STRATEGY,
+                             dual_engine_setup, dual_signal_candidate)
 from .perpetual_history import OkxHistory
 from .perpetual_market import CHANNELS, HISTORY_LIMIT, OKX_CANDLES_WS, MarketError, closed_windows, history, instrument_rules, now_ms, parse_candle, quote
 from .perpetual_outcomes import SignalOutcomes, entry_second
@@ -24,7 +26,7 @@ from .perpetual_strategy import PROFILES, detect_setup, detect_trend_setup, exit
 from .perpetual_trade import TradeAgent
 
 MINUTE = TIMEFRAMES["1m"]
-FIXED_STRATEGIES = {BTC_STRATEGY: BTC_POLICY, COMPRESSION_STRATEGY: COMPRESSION_POLICY}
+FIXED_STRATEGIES = {BTC_STRATEGY: BTC_POLICY, COMPRESSION_STRATEGY: COMPRESSION_POLICY, DUAL_STRATEGY: DUAL_POLICY}
 logger = logging.getLogger(__name__)
 
 
@@ -69,8 +71,7 @@ class PerpetualMonitor:
 
     def __init__(self, instrument, market_client, model_client, journal, paper=None, *, profile="v2"):
         self.instrument = instrument
-        self.channels = {name: period for name, period in CHANNELS.items()
-                         if period != "4h" or instrument == BTC_INSTRUMENT}
+        self.channels = dict(CHANNELS)
         self.market_client = market_client
         self.model_client = model_client
         self.journal = journal
@@ -101,7 +102,7 @@ class PerpetualMonitor:
 
     def start(self, mode, strategy="all"):
         policy = FIXED_STRATEGIES.get(strategy)
-        if policy is not None and self.instrument != policy.instrument:
+        if policy is not None and policy.instrument != "ALL" and self.instrument != policy.instrument:
             raise ValueError(f"此策略仅适用于 {policy.instrument.split('-')[0]} 永续")
         strategy_changed = strategy != self.selected_strategy
         if strategy_changed:
@@ -216,7 +217,7 @@ class PerpetualMonitor:
         timeframes = {"1m", "15m", "1h"}
         if self.fixed_policy:
             timeframes.add("30m")
-        if self.selected_strategy == BTC_STRATEGY:
+        if self.selected_strategy in (BTC_STRATEGY, DUAL_STRATEGY):
             timeframes.add("4h")
         windows = closed_windows({tf: rows for tf, rows in self.bars.items() if tf in timeframes}, end)
         if windows is None:
@@ -229,6 +230,8 @@ class PerpetualMonitor:
             analysis["setup"] = live_btc_setup(windows)
         elif self.selected_strategy == COMPRESSION_STRATEGY:
             analysis["setup"] = compression_setup(windows["30m"])
+        elif self.selected_strategy == DUAL_STRATEGY:
+            analysis["setup"] = dual_engine_setup(windows)
         setup = analysis["setup"]
         self.evaluation = {"closed_at": end, **analysis}
         self.market_note = "策略已计算最新收盘 K 线"
@@ -240,7 +243,7 @@ class PerpetualMonitor:
             return
         if self.fixed_policy:
             if end == setup["closed_at"]:
-                trigger = setup["timeframe"] if self.selected_strategy == BTC_STRATEGY else "30m"
+                trigger = setup["timeframe"] if self.selected_strategy in (BTC_STRATEGY, DUAL_STRATEGY) else "30m"
                 self.queue_review(end, windows[trigger][-1], analysis, "等待收盘后一分钟的入场盘口")
             return
         _, policy_id, _ = PROFILES[self.profile]
@@ -281,6 +284,8 @@ class PerpetualMonitor:
         return self.journal.outcomes.get(previous["id"])
 
     def fixed_candidate(self, policy, setup, market_quote, published_at):
+        if policy.strategy == DUAL_STRATEGY:
+            return dual_signal_candidate(self.instrument, setup, market_quote, self.rules, published_at)
         return fixed_signal_candidate(policy, setup, market_quote, self.rules, published_at)
 
     async def review(self, job):
@@ -343,7 +348,8 @@ class PerpetualMonitor:
             if outcome is None or outcome["status"] == "unverified":
                 self.review_state.update(status="wait", note="这套策略有一笔信号仍在追踪")
                 return
-            if end - previous["closed_at"] < FIXED_COOLDOWN_MINUTES * MINUTE:
+            cooldown = DUAL_COOLDOWN_MINUTES if policy.strategy == DUAL_STRATEGY else FIXED_COOLDOWN_MINUTES
+            if end - previous["closed_at"] < cooldown * MINUTE:
                 self.review_state.update(status="wait", note="上一条信号仍在冷却期")
                 return
         self.review_state.update(status="reviewing", note="核对入场时间与一档盘口深度")
