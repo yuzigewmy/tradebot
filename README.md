@@ -1,48 +1,272 @@
-# 加密研究台
+<div align="center">
 
-本地 BTC/ETH 研究助手，提供现货分析、USDT 永续研判和可选的币安自动下单。现货按同一截止时间分析日线、4H、1H，生成中文报告、条件情景和手工持仓评估。
+<img src="docs/assets/banner.svg" alt="Tradebot — Crypto Spot Research & Binance Futures Auto-Trading Workbench" width="100%" />
 
-## 启动
+<br />
+<br />
 
-```powershell
-Set-Location D:\crypto-spot-agent
-.\start.ps1
+**English** · [简体中文](README.zh-CN.md)
+
+<br />
+
+[![Python 3.12+](https://img.shields.io/badge/Python-3.12%20%7C%203.13-3776AB?style=flat-square&logo=python&logoColor=white)](pyproject.toml)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?style=flat-square&logo=fastapi&logoColor=white)](src/spot_agent/api.py)
+[![TA-Lib](https://img.shields.io/badge/Indicators-TA--Lib%20Deterministic-157A54?style=flat-square)](src/spot_agent/technicals.py)
+[![Binance Futures SDK](https://img.shields.io/badge/Exchange-Binance%20USDT--M%20SDK-F0B90B?style=flat-square&logo=binance&logoColor=black)](docs/binance-futures.md)
+[![Local-First](https://img.shields.io/badge/Bind-127.0.0.1%20Local--First-0F172A?style=flat-square)](#security--risk-boundaries)
+
+<p align="center">
+  A local-first cryptocurrency spot research and Binance USDT-M perpetual auto-trading workbench.<br />
+  Built around strict closed-candle determinism, the <strong>S10 Dual-Engine</strong> trend strategy, real-time account PnL attribution, optional LLM review, and a WeChat AI assistant.
+</p>
+
+[Features](#-workbench-overview) · [Architecture](#-system-architecture) · [S10 Strategy](#-s10-dual-engine-strategy) · [Quick Start](#-quick-start) · [Configuration](#-configuration) · [Documentation](#-documentation)
+
+</div>
+
+---
+
+## ✨ Why Tradebot?
+
+Most retail trading bots blur indicator math with LLM guesses, evaluate repainting candles mid-bar, or silently fall back to mock data when an exchange call fails. **Tradebot** enforces hard engineering boundaries:
+
+- **Strict Closed-Candle Determinism** — Every official signal is computed exclusively on bars closed before the cutoff timestamp using deterministic `TA-Lib` / NumPy math. No repainting, no look-ahead bias.
+- **No Silent Fallbacks** — Live public market feeds, synthetic demo data, and historical CSV replays are explicitly separated and labeled. If an exchange endpoint or ledger slice is unavailable or truncated, the UI reports it plainly instead of fabricating numbers.
+- **Auditable Risk & Execution** — Live Binance USDT-M execution is opt-in via process environment variables (`BINANCE_FUTURES_MODE=demo|live`), enforces server clock sync, spread/quote freshness gates, isolated margin, automatic protective SL/TP orders, breakeven shifts, and trailing stops.
+- **Local-First Privacy** — Binds exclusively to `127.0.0.1`. API keys, account credentials, live market state, and personal positions never enter Git or frontend bundles.
+
+---
+
+## 🖥️ Workbench Overview
+
+<div align="center">
+  <img src="docs/assets/workbench-preview.svg" alt="Tradebot Workbench Preview (Illustrative Demo Data)" width="100%" />
+  <sub><em>Illustrative preview with synthetic demo balances — covers the unified 5-page local web interface.</em></sub>
+</div>
+
+<br />
+
+| Workspace | Route | Key Capabilities |
+| :--- | :--- | :--- |
+| **Spot Research** | `/` | Synchronized `1D / 4H / 1H` closed-candle technical reports, conditional market scenarios, CSV historical replay, manual portfolio sizing, Markdown export, and optional streaming LLM deep analysis. |
+| **Perpetual Monitor** | `/perpetual` | Independent `BTC-USDT-SWAP` and `ETH-USDT-SWAP` background monitors supporting **S10 Dual-Engine**, `15m` Range Breakout, Trend Pullback, and Compression strategies with live quote & cost verification. |
+| **Auto-Trade Console** | `/static/auto-trade.html` | End-to-end unattended Binance USDT-M workflow visibility: active execution mode (`off / demo / live`), strategy status, protective SL/TP management, breakeven/trailing state, and execution audit log. |
+| **Account & Analytics** | `/account` | Real-time Binance USDT-M wallet balance, equity, available margin, unrealized PnL with live `USD/CNY` conversion, margin & shock-scenario calculator, open positions, and an interactive **7-Day Balance & Cumulative Trade Net Curve** reconstructed with exact `Decimal` ledger math. |
+| **WeChat AI Assistant** | `/wechat` | QR-code pairing with persistent local session, automatic push notifications for confirmed signals and live order events, and an interactive AI assistant (8-turn session memory) that queries live monitor status, funding rates, spot/perpetual comparisons, and local backtests. |
+
+---
+
+## 🏗️ System Architecture
+
+```mermaid
+flowchart LR
+    subgraph Feeds["Market & Account Feeds"]
+        BN["Binance USDT-M<br/>Public + Official SDK"]
+        OKX["OKX Public API<br/>Spot / Swap / FX"]
+        CSV["Local CSV Replay<br/>Explicitly Labeled"]
+    end
+
+    subgraph Core["Deterministic Engine (Python / FastAPI)"]
+        TA["TA-Lib &amp; Closed-Candle<br/>Indicator Pipeline"]
+        S10["S10 Dual-Engine &amp;<br/>15m / Regime Strategies"]
+        RISK["Risk Sizer &amp; Quote Gate<br/>3% Risk · 10x Isolated · Clock Sync"]
+        LEDGER["Exact Decimal Account<br/>&amp; 7-Day PnL Attribution"]
+    end
+
+    subgraph Interfaces["Execution, AI &amp; UI"]
+        EXEC["Binance Live / Demo<br/>Entry + SL/TP + Trailing"]
+        LLM["Optional Responses API<br/>Streaming Review &amp; Chat"]
+        WEB["5-Page Local Web UI<br/>127.0.0.1:8765"]
+        WX["WeChat Bot<br/>Signal Push &amp; Q&amp;A"]
+    end
+
+    BN --> TA
+    OKX --> TA
+    CSV --> TA
+    TA --> S10 --> RISK
+    RISK --> EXEC
+    RISK --> WX
+    BN --> LEDGER --> WEB
+    TA --> LLM --> WEB
+    LLM <--> WX
+    S10 --> WEB
+    EXEC --> WEB
 ```
 
-打开 `http://127.0.0.1:8765`。服务只监听本机。若换端口，执行 `.\start.ps1 -Port 8766`。
+---
 
-在其他机器重建环境时，使用 Python 3.13：
+## 🎯 S10 Dual-Engine Strategy
+
+The flagship **`dual_trend_engine` (S10)** strategy combines two complementary closed-candle `1H` entry engines under a shared `4H` trend filter, designed to capture both trend pullbacks and volatility expansions while strictly capping per-trade risk.
+
+<div align="center">
+  <img src="docs/assets/s10-engine.svg" alt="S10 Dual-Engine Strategy Flow" width="100%" />
+</div>
+
+<br />
+
+| Parameter | S4 — 1H Pullback + RSI Reset | S3 — 1H Keltner Breakout |
+| :--- | :--- | :--- |
+| **Higher-TF Gate** | Closed `4H` `EMA20` vs `EMA50`, `ADX ≥ 18` | Closed `4H` `EMA20` vs `EMA50`, `ADX ≥ 20` |
+| **Entry Trigger (1H)** | Prior 3-bar RSI dip (`<42` long / `>58` short), close reclaims `EMA20`, breaks prior bar high/low, RSI `>45` / `<55` | `1H` close breaks `EMA20 ± 2.0 × ATR` Keltner Channel with volume ratio `≥ 1.1×` |
+| **Stop Loss / Take Profit** | `2.0 × ATR` SL · `2.5 × ATR` TP | `2.0 × ATR` SL · `4.5 × ATR` TP |
+| **Active Protection** | Move SL to breakeven at `+1.2R` | Move SL to breakeven at `+1.5R` + `2.2 × ATR` trailing stop |
+| **Risk & Limits** | `3%` equity risk/trade · `10×` isolated · `≤ 5×` notional cap · `0.4%–4.0%` stop band · `120m` cooldown · `48h` max hold | Same unified portfolio risk guard |
+
+> [!NOTE]
+> Historical backtest and live paper-trading reports are reproducible from public exchange data. Backtest performance reflects specific historical windows and fill assumptions and does not guarantee future returns.
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- **Python 3.12 or 3.13** (3.13 recommended to match `requirements.lock.txt`)
+- Windows PowerShell (for `start.ps1`) or any OS with `uvicorn`
+- Optional: OpenAI-compatible Responses API credentials (for LLM deep analysis & WeChat chat)
+- Optional: Binance USDT-M Futures API keys (only required for `demo` or `live` execution / `/account`)
+
+### 1. Clone & Install
 
 ```powershell
+git clone https://github.com/yuzigewmy/tradebot.git
+cd tradebot
+
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.lock.txt
 .\.venv\Scripts\python.exe -m pip install -e . --no-deps
+```
+
+### 2. Configure Environment
+
+```powershell
+Copy-Item .env.example .env
+# Edit .env with your optional LLM gateway and Binance mode settings
+```
+
+### 3. Launch the Workbench
+
+```powershell
+# Default local research & signal mode (binds 127.0.0.1:8765)
+.\start.ps1
+
+# Custom port
+.\start.ps1 -Port 8766
+
+# Live Binance execution mode (explicitly loads .env.binance-live with override)
+.\start.ps1 -Port 8765 -Live
+
+# Run silently in the background on Windows (logs written to logs/)
+.\start.ps1 -Port 8765 -Live -Background
+```
+
+On macOS / Linux, launch directly via `uvicorn`:
+
+```bash
+.venv/bin/python -m uvicorn spot_agent.api:app --host 127.0.0.1 --port 8765 --env-file .env
+```
+
+Open **`http://127.0.0.1:8765`** in your browser.
+
+---
+
+## ⚙️ Configuration
+
+All credentials are read strictly from process environment variables (`.env` for standard startup, `.env.binance-live` when launching with `-Live`).
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `BINANCE_FUTURES_MODE` | `off` | Execution mode: `off` (signals only), `demo` (Binance Futures Testnet/Demo), or `live` (real funds). |
+| `BINANCE_FUTURES_API_KEY` | — | Binance Futures API key (required for `demo` / `live` and `/account`). |
+| `BINANCE_FUTURES_API_SECRET` | — | Binance Futures API secret. |
+| `SPOT_LLM_BASE_URL` | — | Optional OpenAI-compatible Responses API endpoint URL. Without it, all deterministic features remain fully usable. |
+| `SPOT_LLM_API_KEY` | — | API key for the LLM endpoint (`store: false` is sent on requests). |
+| `SPOT_LLM_MODEL` | `gpt-6.2-sol` | Model identifier used for spot deep review, perpetual review, and WeChat assistant. |
+| `SPOT_LLM_REASONING_EFFORT` | `high` | Reasoning effort sent to the Responses API. |
+| `SPOT_LLM_SERVICE_TIER` | — | Optional service tier (the UI reports the actual tier returned by the gateway). |
+| `SPOT_LLM_ACTOR_AUTHORIZATION` | — | Optional actor authorization header if required by a custom gateway. |
+
+---
+
+## 🧪 Testing & Backtesting
+
+Run the unit test suite:
+
+```powershell
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-## 永续开仓研判
+Key targeted suites:
 
-- 打开 `/perpetual`，分别启动 BTC 或 ETH。行情观察模式显示收盘分析，复核并推送模式在通过报价与成本门槛后调用模型。可单独启用区间突破或趋势回踩。关闭网页后监控继续运行。重启服务后重新启动监控。
-- OKX 通过 WebSocket 更新 1m、15m、1H 成交 K 线。新版用一小时判断趋势，十五分钟识别区间突破和趋势回踩，一分钟跟踪成交及入场时效。模型根据计算证据确认初始候选，程序重新读取盘口并校验价格与成本。
-- 信号包含方向、入场参考、止盈、止损和持仓截止。入场窗口为触发收盘后的第一分钟。发布记录保存在 `data/perpetual-signals.jsonl`，绑定微信后可以收到新信号。后台模拟使用相同的价格和持仓规则。
-- 调研、模式和复跑命令见[永续策略升级](docs/perpetual-v2.md)。策略参数与模型复核提示词见 [15m-policy.json](skills/perpetual-entry/15m-policy.json) 和 [15m-review.md](skills/perpetual-entry/15m-review.md)。
+```powershell
+# S10 Dual-Engine strategy & bracket math
+.\.venv\Scripts\python.exe -m pytest -q tests/test_perpetual_dual.py
 
-历史回测与实时模拟使用同一逐仓账户，默认 BTC/ETH 共用 100 USDT、25×、单笔计划止损风险为账户权益的 1%。回测读取 OKX 公开成交、盘口、标记价和已结算资金费率，并实际调用策略 Skill。运行命令、执行明细和数据边界见[永续回测与实时模拟](docs/perpetual-backtest.md)。
+# Binance Futures execution, clock sync, and order protection
+.\.venv\Scripts\python.exe -m pytest -q tests/test_binance_futures.py
 
-币安模式支持公开盘口和收盘 K 线，也可使用官方 SDK 接入 Demo 或实盘。配置和验收步骤见[币安永续自动下单](docs/binance-futures.md)。
+# Account wallet snapshot & 7-day balance curve reconstruction
+.\.venv\Scripts\python.exe -m pytest -q tests/test_account_api.py
 
-## 微信助手
+# WeChat bridge & assistant context routing
+.\.venv\Scripts\python.exe -m pytest -q tests/test_wechat.py
+```
 
-在研究台顶部打开「微信」，用手机扫码确认，再给机器人发一条私聊。可以直接交谈、写作、查询公开资料，也可以让助手比较 BTC 和 ETH 的现货或永续走势、查看资金费、查询信号以及解释本地回测。助手保留本次服务运行中的最近八轮对话。编辑 [微信助手提示词](prompts/wechat-assistant.md) 后，下一条问答读取新内容。
+For full historical replay, funding-fee accounting, and live paper-trading commands, see [docs/perpetual-backtest.md](docs/perpetual-backtest.md).
 
-永续监控启动后，策略和模型复核通过的新信号会自动推送给绑定账号。推送沿用发布记录里的方向、开仓参考、止盈、止损和有效期。微信绑定会在本机重启后恢复，永续监控的启动方式见上文。
+---
 
-## 现货分析与模型配置
+## 📁 Project Structure
 
-- 真实行情从所选交易所获取；无网络时可显式选择合成演示。CSV 历史回放只分析实际导入的周期。三类来源分别标记。
-- 持仓只含当前币种与所填现金。调整风险参数后可用当前报告快照评估，无需重新请求行情。
-- 深度研判使用 Responses API。项目的 `.env` 保存本机接口设置，模板见 `.env.example`。模型、推理强度、服务档位分别由 `SPOT_LLM_MODEL`、`SPOT_LLM_REASONING_EFFORT`、`SPOT_LLM_SERVICE_TIER` 配置。无配置时可使用全部确定性分析。
-- 本机配置使用 `gpt-6.2-sol` / `high`。该网关实测接受 `ultrafast` 并返回同名档位，`priority` 和 `fast` 探测则返回 `default`。应用显示网关实际返回的档位，不根据单次测试承诺提速。
-- 深度研判会将用户问题和所调用的证据发送到配置的模型服务。只有调用持仓工具时才发送持仓情景。请求设置 `store: false`，第三方网关自身的数据保留以其规则为准。密钥仅供服务器使用，不会放入网页、报告或 Git。
+<details>
+<summary><strong>Click to expand directory tree</strong></summary>
 
-现货快照保存在 `data/reports/`，可导出 Markdown。参考[现货实施方案](docs/implementation-plan.md)和[调研记录](docs/research.md)。历史模拟收益只描述指定样本和撮合假设。
+```text
+crypto-spot-agent/
+├── src/spot_agent/
+│   ├── api.py                   # FastAPI application & route wiring
+│   ├── market.py / technicals.py# Closed-candle spot data & TA-Lib indicators
+│   ├── strategy.py / portfolio.py / report.py
+│   ├── agent.py                 # Streaming Responses API deep research agent
+│   ├── perpetual_dual.py        # S10 Dual-Engine (S4 Pullback + S3 Keltner)
+│   ├── perpetual_strategy.py    # 15m / Regime strategies & policy evaluation
+│   ├── perpetual_monitor.py     # Background perpetual monitors & signal journal
+│   ├── perpetual_backtest.py    # Historical replay & live paper-trading engine
+│   ├── binance_sdk.py           # Official Binance USDT-M SDK wrapper & clock sync
+│   ├── binance_execution.py     # Order placement, protective SL/TP & trailing stop
+│   ├── binance_monitor.py       # Binance perpetual monitor bridge
+│   ├── account_api.py           # Wallet snapshot, FX rate & 7-day PnL/balance curve
+│   └── wechat_*.py              # QR pairing, signal push & AI assistant bridge
+├── web/                         # Native zero-build 5-page web UI (HTML/CSS/JS)
+├── skills/perpetual-entry/      # Strategy policy JSON & LLM review prompts
+├── prompts/                     # Editable WeChat assistant system prompt
+├── docs/                        # Research notes, backtest specs & visual assets
+├── tests/                       # Pytest unit & integration suites
+└── start.ps1                    # Local & live Windows launcher script
+```
+
+</details>
+
+---
+
+## 📚 Documentation
+
+- [Binance Futures Auto-Trading Guide](docs/binance-futures.md) — API permissions, Demo vs Live setup, and acceptance checks
+- [Perpetual Strategy V2 Upgrade](docs/perpetual-v2.md) — Multi-timeframe structure, modes, and review flow
+- [Perpetual Backtest & Live Paper Trading](docs/perpetual-backtest.md) — Reproducible backtest CLI, fill assumptions, and data boundaries
+- [Regime Research Notes](docs/perpetual-regime-research.md) — Market regime diagnostics and strategy comparisons
+- [Spot Implementation Plan](docs/implementation-plan.md) & [Research Notes](docs/research.md)
+- [15m Strategy Policy](skills/perpetual-entry/15m-policy.json) · [15m Review Prompt](skills/perpetual-entry/15m-review.md) · [WeChat Assistant Prompt](prompts/wechat-assistant.md)
+
+---
+
+## 🔒 Security & Risk Boundaries
+
+> [!WARNING]
+> **Cryptocurrency perpetual futures involve substantial financial risk and leverage.** Always verify strategy behavior in signal-only (`off`) or Binance `demo` mode before enabling `live` trading. You are solely responsible for your API keys, capital allocation, and live execution decisions.
+
+> [!IMPORTANT]
+> - Keep `.env`, `.env.binance-live`, `data/`, and `logs/` out of version control (already excluded by `.gitignore`).
+> - Restrict Binance API keys to **Futures trading only** without withdrawal permissions, and bind your static IP whenever possible.
+> - Ensure your host system clock is synchronized (NTP) before running live signed Binance requests.

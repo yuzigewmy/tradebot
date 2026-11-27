@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" width="1200" height="400" role="img" aria-label="S10 Dual-Engine Trend Strategy Architecture">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#64748B"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#157A54"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="400" rx="16" fill="#F8FAF8" stroke="#DCE2DB" stroke-width="1.5"/>
+
+  <!-- Header -->
+  <text x="36" y="42" fill="#0F172A" font-family="'Inter',-apple-system,sans-serif" font-size="18" font-weight="800">S10 Dual-Engine Trend Strategy (dual_trend_engine)</text>
+  <text x="36" y="64" fill="#64748B" font-family="'Inter',-apple-system,sans-serif" font-size="12.5">Closed-candle 4H trend filter feeding two complementary 1H entry engines with unified dynamic risk &amp; trailing protection</text>
+
+  <!-- Step 1: 4H Trend Gate -->
+  <g transform="translate(36, 98)">
+    <rect width="236" height="252" rx="12" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1.5"/>
+    <rect width="236" height="36" rx="12" fill="#0F172A"/>
+    <rect y="20" width="236" height="16" fill="#0F172A"/>
+    <text x="118" y="23" text-anchor="middle" fill="#F8FAFC" font-family="'JetBrains Mono',ui-monospace,monospace" font-size="12" font-weight="700">1. 4H TREND GATE</text>
+
+    <text x="18" y="68" fill="#0F172A" font-family="'Inter',-apple-system,sans-serif" font-size="13" font-weight="700">Closed 4H Alignment</text>
+    <text x="18" y="92" fill="#475569" font-family="'JetBrains Mono',ui-monospace,monospace" font-size="11.5">• Long : EMA20 &gt; EMA50</text>
+    <text x="18" y="114" fill="#475569" font-family="'JetBrains Mono',ui-monospace,monospace" font-size="11.5">• Short: EMA20 &lt; EMA50</text>
+    <text x="18" y="142" fill="#0F172A" font-family="'Inter',-apple-system,sans-serif" font-size="13" font-weight="700">Trend Strength (ADX)</text>
+    <text x="18" y="166" fill="#475569" font-family="'JetBrains Mono',ui-monospace,monospace" font-size="11.5">• S4 requires ADX ≥ 18</text>
+    <text x="18" y="188" fill="#475569" font-family="'JetBrains Mono',ui-monospace,monospace" font-size="11.5">• S3 requires ADX ≥ 20</text>
+
+    <rect x="16" y="206" width="204" height="30" rx="7" fill="#F1F5F9"/>
+    <text x="118" y="225" text-anchor="middle" fill="#334155" font-family="'Inter',-apple-system,sans-serif" font-size="11" font-weight="600">No look-ahead · Strict bar close</text>
+  </g>
+
+  <!-- Connectors 1 -> 2A & 2B -->
+  <path d="M 272 194 H 304 V 154 H 326" fill="none" stroke="#64748B" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M 272 254 H 304 V 292 H 326" fill="none" stroke="#64748B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Step 2A: S4 Engine -->
+  <g transform="translate(332, 98)">
+    <rect width="290" height="118" rx="12" fill="#FFFFFF" stroke="#157A54" stroke-width="1.5"/>
+    <rect x="14" y="14" width="60" height="22" rx="11" fill="#ECFDF5" stroke="#A7F3D0"/>
+    <text x="44" y="29" text-anchor="middle" fill="#065F46" font-family="'JetBrains Mono',ui-monospace,monospace" font-size="11" font-weight="700">S4 · 1H</text>
+    <text x="84" y="29" fill="#0F172A" font-family="'Inter',-apple-system,sans-serif" font-size="13.5" font-weight="700">Pullback + RSI Reset</text>
+    <text x="16" y="56" fill="#475569" font-family="'Inter',-apple-system,sans-serif" font-size="11.5">Prior 3-bar RSI dip (&lt;42 / &gt;58) + reclaim EMA20</text>
+    <text x="16" y="76" fill="#475569" font-family="'Inter',-apple-system,sans-serif" font-size="11.5">Close breaks prev bar high/low + RSI &gt;45 / &lt;55</text>
+    <text x="16" y="100" fill="#157A54" font-family="'JetBrains Mono',ui-monospace,monospace" font-size="11" font-weight="600">SL 2.0 ATR · TP 2.5 ATR · BE @ 1.2R</text>
+  </g>
+
+  <!-- Step 2B: S3 Engine -->
+  <g transform="translate(332, 232)">
+    <rect width="290" height="118" rx="12" fill="#FFFFFF" stroke="#0284C7" stroke-width="1.5"/>
+    <rect x="14" y="14" width="60" height="22" rx="11" fill="#E0F2FE" stroke="#BAE6FD"/>
+    <text x="44" y="29" text-anchor="middle" fill="#0369A1" font-family="'JetBrains Mono',ui-monospace,monospace" font-size="11" font-weight="700">S3 · 1H</text>
+    <text x="84" y="29" fill="#0F172A" font-family="'Inter',-apple-system,sans-serif" font-size="13.5" font-weight="700">Keltner Breakout</text>
+    <text x="16" y="56" fill="#475569" font-family="'Inter',-apple-system,sans-serif" font-size="11.5">1H close crosses EMA20 ± 2.0 × ATR channel</text>
+    <text x="16" y="76" fill="#475569" font-family="'Inter',-apple-system,sans-serif" font-size="11.5">Volume ratio ≥ 1.1× 20-bar average</text>
+    <text x="16" y="100" fill="#0369A1" font-family="'JetBrains Mono',ui-monospace,monospace" font-size="11" font-weight="600">SL 2.0 ATR · TP 4.5 ATR · BE 1.5R + 2.2 Trail</text>
+  </g>
+
+  <!-- Connectors 2 -> 3 -->
+  <path d="M 622 154 H 654 V 200 H 676" fill="none" stroke="#64748B" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M 622 292 H 654 V 248 H 676" fill="none" stroke="#64748B" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Step 3: Risk & Sizing Guard -->
+  <g transform="translate(682, 98)">
+    <rect width="224" height="252" rx="12" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1.5"/>
+    <rect width="224" height="36" rx="12" fill="#1E293B"/>
+    <rect y="20" width="224" height="16" fill="#1E293B"/>
+    <text x="112" y="23" text-anchor="middle" fill="#F8FAFC" font-family="'JetBrains Mono',ui-monospace,monospace" font-size="12" font-weight="700">3. RISK SIZING</text>
+
+    <text x="16" y="68" fill="#0F172A" font-family="'JetBrains Mono',ui-monospace,monospace" font-size="12" font-weight="700">3% Equity Risk / Trade</text>
+    <text x="16" y="92" fill="#475569" font-family="'Inter',-apple-system,sans-serif" font-size="11.5">qty = risk / |entry − stop|</text>
+    <line x1="16" y1="108" x2="208" y2="108" stroke="#E2E8F0"/>
+    <text x="16" y="132" fill="#475569" font-family="'JetBrains Mono',ui-monospace,monospace" font-size="11.5">• Leverage : 10x Isolated</text>
+    <text x="16" y="154" fill="#475569" font-family="'JetBrains Mono',ui-monospace,monospace" font-size="11.5">• Notional : ≤ 5x Equity</text>
+    <text x="16" y="176" fill="#475569" font-family="'JetBrains Mono',ui-monospace,monospace" font-size="11.5">• Stop Band: 0.4% ~ 4.0%</text>
+    <text x="16" y="198" fill="#475569" font-family="'JetBrains Mono',ui-monospace,monospace" font-size="11.5">• Cooldown : 120 min</text>
+    <text x="16" y="220" fill="#475569" font-family="'JetBrains Mono',ui-monospace,monospace" font-size="11.5">• Max Hold : 48 hours</text>
+  </g>
+
+  <!-- Connector 3 -> 4 -->
+  <path d="M 906 224 H 942" fill="none" stroke="#157A54" stroke-width="2.2" marker-end="url(#arrowGreen)"/>
+
+  <!-- Step 4: Execution & Protection -->
+  <g transform="translate(948, 98)">
+    <rect width="216" height="252" rx="12" fill="#ECFDF5" stroke="#157A54" stroke-width="1.5"/>
+    <rect width="216" height="36" rx="12" fill="#157A54"/>
+    <rect y="20" width="216" height="16" fill="#157A54"/>
+    <text x="108" y="23" text-anchor="middle" fill="#FFFFFF" font-family="'JetBrains Mono',ui-monospace,monospace" font-size="12" font-weight="700">4. EXECUTION</text>
+
+    <text x="16" y="68" fill="#064E3B" font-family="'Inter',-apple-system,sans-serif" font-size="12.5" font-weight="700">Binance Futures SDK</text>
+    <text x="16" y="92" fill="#065F46" font-family="'Inter',-apple-system,sans-serif" font-size="11.5">• Quote &amp; spread gate</text>
+    <text x="16" y="114" fill="#065F46" font-family="'Inter',-apple-system,sans-serif" font-size="11.5">• Market entry + SL/TP</text>
+    <text x="16" y="136" fill="#065F46" font-family="'Inter',-apple-system,sans-serif" font-size="11.5">• Live breakeven move</text>
+    <text x="16" y="158" fill="#065F46" font-family="'Inter',-apple-system,sans-serif" font-size="11.5">• Dynamic trailing SL</text>
+    <text x="16" y="180" fill="#065F46" font-family="'Inter',-apple-system,sans-serif" font-size="11.5">• 48h timeout close</text>
+    <rect x="14" y="200" width="188" height="34" rx="8" fill="#FFFFFF" stroke="#A7F3D0"/>
+    <text x="108" y="221" text-anchor="middle" fill="#065F46" font-family="'Inter',-apple-system,sans-serif" font-size="11" font-weight="700">+ Real-time WeChat Push</text>
+  </g>
+</svg>
