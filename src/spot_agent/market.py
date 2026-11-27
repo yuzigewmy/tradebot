@@ -5,6 +5,7 @@ Source: https://github.com/ccxt/ccxt/wiki/Manual#ohlcv-candlestick-charts
 
 from dataclasses import dataclass
 import math
+import os
 import time
 
 import ccxt
@@ -57,14 +58,18 @@ def build_frame(rows, exchange, symbol, timeframe, source, as_of):
 
 
 def fetch_market(exchange_id, symbol, count=600):
-    exchange = getattr(ccxt, exchange_id)({
+    config = {
         "enableRateLimit": True,
         "timeout": 15000,
         "options": {
             "defaultType": "spot", "fetchMarkets": {"types": ["spot"]},
             "fetchOHLCV": {"timezone": "UTC"},
         },
-    })
+    }
+    proxies = {k: v for k, env in (("http", "HTTP_PROXY"), ("https", "HTTPS_PROXY")) if (v := os.environ.get(env))}
+    if proxies:
+        config["proxies"] = proxies
+    exchange = getattr(ccxt, exchange_id)(config)
     exchange.load_markets()
     if not exchange.market(symbol)["spot"]:
         raise ValueError("只支持现货市场")
