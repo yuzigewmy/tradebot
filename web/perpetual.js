@@ -292,14 +292,14 @@ function selectPeriod(value) {
 }
 
 function syncInstrumentControls() {
-  const eth = $("#instrument").value === "ETH-USDT-SWAP";
+  const inst = $("#instrument").value;
   const binance = snapshot?.exchange === "Binance";
   $(`#strategy-select [value="${autoRegimeStrategy}"]`).disabled = false;
   $(`#strategy-select [value="${dualStrategy}"]`).disabled = false;
   $(`#strategy-select [value="${macroAggressiveStrategy}"]`).disabled = false;
   $(`#strategy-select [value="${macroSteadyStrategy}"]`).disabled = false;
-  $(`#strategy-select [value="${compressionStrategy}"]`).disabled = !eth;
-  $(`#strategy-select [value="${btcStrategy}"]`).disabled = eth;
+  $(`#strategy-select [value="${compressionStrategy}"]`).disabled = inst !== "ETH-USDT-SWAP";
+  $(`#strategy-select [value="${btcStrategy}"]`).disabled = inst !== "BTC-USDT-SWAP";
   for (const okxOnly of ["all", "channel_breakout", "trend_pullback"]) {
     $(`#strategy-select [value="${okxOnly}"]`).disabled = binance;
   }

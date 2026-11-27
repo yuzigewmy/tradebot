@@ -7,7 +7,7 @@ from math import isfinite
 
 from .perpetual_market import HISTORY_LIMIT, MarketError, now_ms
 
-SYMBOLS = {"BTC-USDT-SWAP": "BTCUSDT", "ETH-USDT-SWAP": "ETHUSDT"}
+SYMBOLS = {"BTC-USDT-SWAP": "BTCUSDT", "ETH-USDT-SWAP": "ETHUSDT", "SOL-USDT-SWAP": "SOLUSDT"}
 DEMO_URL = "https://demo-fapi.binance.com"
 LIVE_URL = "https://fapi.binance.com"
 

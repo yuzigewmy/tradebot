@@ -30,14 +30,14 @@ class PortfolioInput(BaseModel):
 class AnalyzeInput(BaseModel):
     source: Literal["live", "synthetic"] = "live"
     exchange: Literal["okx", "binance"] = "okx"
-    symbol: Literal["BTC/USDT", "ETH/USDT"] = "BTC/USDT"
+    symbol: Literal["BTC/USDT", "ETH/USDT", "SOL/USDT"] = "BTC/USDT"
     portfolio: PortfolioInput | None = None
 
 
 class ImportInput(BaseModel):
     csv: str = Field(min_length=1, max_length=2000000)
     exchange: str = Field(default="csv", pattern=r"^[a-zA-Z0-9_-]{1,20}$")
-    symbol: Literal["BTC/USDT", "ETH/USDT"] = "BTC/USDT"
+    symbol: Literal["BTC/USDT", "ETH/USDT", "SOL/USDT"] = "BTC/USDT"
     timeframe: Literal["1h", "4h", "1d"] = "1h"
     portfolio: PortfolioInput | None = None
 

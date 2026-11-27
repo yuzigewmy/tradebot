@@ -8,7 +8,7 @@
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/styles.css?v=2">
   <link rel="stylesheet" href="/static/auto-trade.css?v=2">
-  <script defer src="/static/auto-trade.js?v=5"></script>
+  <script defer src="/static/auto-trade.js?v=6"></script>
 </head>
 <body>
   <header class="app-header">
@@ -40,6 +40,7 @@
         <div class="contract-switch" role="group" aria-label="选择合约">
           <button type="button" data-asset="BTC" aria-pressed="true" aria-controls="trade-flow">BTCUSDT</button>
           <button type="button" data-asset="ETH" aria-pressed="false" aria-controls="trade-flow">ETHUSDT</button>
+          <button type="button" data-asset="SOL" aria-pressed="false" aria-controls="trade-flow">SOLUSDT</button>
         </div>
       </div>
       <div class="contract-status">
@@ -49,7 +50,7 @@
         <p class="quiet" id="contract-detail" hidden></p>
       </div>
       <ol id="trade-flow" class="trade-flow" role="list">
-        <li><h3>收盘研判</h3><p>读取已收盘 K 线，按 BTC 或 ETH 策略判断入场条件。</p><span class="step-state" id="market-step">等待状态</span></li>
+        <li><h3>收盘研判</h3><p>读取已收盘 K 线，按 BTC、ETH 或 SOL 策略判断入场条件。</p><span class="step-state" id="market-step">等待状态</span></li>
         <li><h3>发布信号</h3><p>记录方向、入场限价、止盈和止损，同步微信。</p><span class="step-state" id="signal-step">等待状态</span></li>
         <li><h3>自动开仓</h3><p>核对资金和盘口后提交限价单，未立即成交的部分由币安撤销。</p><span class="step-state" id="entry-step">等待状态</span></li>
         <li><h3>挂止盈止损</h3><p>按实际仓位先挂止损，再挂止盈。子 agent 跟踪并推送提前退出建议。</p><span class="step-state" id="protection-step">等待状态</span></li>

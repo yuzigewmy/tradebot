@@ -77,12 +77,16 @@ function renderSummary() {
   label("runtime-state", tradingState(health, count, markets));
   byId("execution-mode").textContent = environments[mode];
   byId("running-count").textContent = enabled ? `${count} / ${markets.length} 个合约运行中` : "当前环境用于研究";
-  const usesRisk = markets[0].risk_percent != null;
+  const activeMarket = markets.find(({instrument}) => instrument === `${asset}-USDT-SWAP`) ?? markets[0];
+  const usesRisk = activeMarket.risk_percent != null;
+  const regime = activeMarket.evaluation?.setup?.regime;
   byId("margin-budget").textContent = !enabled ? "—"
-    : usesRisk ? `单笔止损风险 ${markets[0].risk_percent}%`
-    : `USDT 钱包余额的 ${markets[0].margin_percent}%`;
-  byId("trade-leverage").textContent = enabled ? `${markets[0].leverage} 倍 · 逐仓` : "—";
-  byId("margin-budget").nextElementSibling.textContent = usesRisk ? "按止损距离动态计算仓位（上限 5×）" : "开仓前按当时余额计算";
+    : usesRisk ? `单笔止损风险 ${activeMarket.risk_percent}%`
+    : `USDT 钱包余额的 ${activeMarket.margin_percent}%`;
+  byId("trade-leverage").textContent = enabled ? `${activeMarket.leverage} 倍 · 逐仓` : "—";
+  byId("margin-budget").nextElementSibling.textContent = usesRisk
+    ? (regime ? `${regime.label} · 上限 ${regime.active_max_notional}×` : "按止损距离动态计算仓位")
+    : "开仓前按当时余额计算";
   byId("margin-budget").nextElementSibling.hidden = !enabled;
   byId("trade-leverage").nextElementSibling.hidden = !enabled;
   const waitingForChat = wechat.connection === "online" && !wechat.has_context;
@@ -169,7 +173,7 @@ async function refresh() {
     const signal = AbortSignal.timeout(5000);
     readings = await Promise.all([
       get("/api/health", signal), get("/api/wechat", signal),
-      get("/api/perpetual/BTC-USDT-SWAP", signal), get("/api/perpetual/ETH-USDT-SWAP", signal),
+      get("/api/perpetual/BTC-USDT-SWAP", signal), get("/api/perpetual/ETH-USDT-SWAP", signal), get("/api/perpetual/SOL-USDT-SWAP", signal),
     ]);
   } catch {
     label("runtime-state", ["后台状态暂不可用", "error"]);
@@ -179,8 +183,8 @@ async function refresh() {
   } finally {
     setTimeout(refresh, 3000);
   }
-  const [health, wechat, btc, eth] = readings;
-  snapshot = {health, wechat, markets: [btc, eth]};
+  const [health, wechat, btc, eth, sol] = readings;
+  snapshot = {health, wechat, markets: [btc, eth, sol]};
   renderSummary();
   renderWorkflow();
   renderActivity();
@@ -191,7 +195,7 @@ for (const button of switches) {
   button.addEventListener("click", () => {
     asset = button.dataset.asset;
     switches.forEach((control) => control.setAttribute("aria-pressed", String(control === button)));
-    if (snapshot) renderWorkflow();
+    if (snapshot) { renderSummary(); renderWorkflow(); }
   });
 }
 

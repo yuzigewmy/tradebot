@@ -3,8 +3,8 @@ from typing import Literal
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-Instrument = Literal["BTC-USDT-SWAP", "ETH-USDT-SWAP"]
-INSTRUMENTS = ("BTC-USDT-SWAP", "ETH-USDT-SWAP")
+Instrument = Literal["BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP"]
+INSTRUMENTS = ("BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP")
 router = APIRouter(prefix="/api/perpetual", tags=["永续合约"])
 
 
