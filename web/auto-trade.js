@@ -3,7 +3,9 @@ const clock = new Intl.DateTimeFormat("zh-CN", {month: "2-digit", day: "2-digit"
 const price = new Intl.NumberFormat("zh-CN", {maximumFractionDigits: 8});
 const environments = {live: "币安实盘", demo: "币安 Demo", quotes: "币安行情", off: "OKX 模拟"};
 const strategies = {
-  dual_trend_engine: "S10 双引擎顺势（回踩 + 突破）",
+  dual_trend_engine: "S10 双引擎顺势（回踩 + 突破 · 30×）",
+  macro_a1_aggressive: "A1 宏观双引擎 · 激进版（4H超趋势 + 1D唐奇安 · 15×）",
+  macro_a1_steady: "A1 宏观双引擎 · 稳健版（4H超趋势 + 1D唐奇安 · 10×）",
   btc_trend_reclaim: "BTC 多周期均线确认", eth_compression_short: "ETH 30 分钟波动收缩做空",
   all: "回踩与突破", channel_breakout: "十五分钟区间突破", trend_pullback: "十五分钟趋势回踩",
 };
