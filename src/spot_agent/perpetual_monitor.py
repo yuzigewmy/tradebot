@@ -18,6 +18,8 @@ from .perpetual_compression import COMPRESSION_POLICY, COMPRESSION_STRATEGY, com
 from .perpetual_dual import (DUAL_COOLDOWN_MINUTES, DUAL_POLICY, DUAL_STRATEGY,
                              dual_engine_setup, dual_signal_candidate)
 from .perpetual_macro import (MACRO_POLICIES, MACRO_STRATEGIES, macro_a1_setup, macro_a1_signal_candidate)
+from .perpetual_router import (AUTO_REGIME_POLICY, AUTO_REGIME_STRATEGY,
+                               auto_regime_setup, auto_regime_signal_candidate)
 from .perpetual_history import OkxHistory
 from .perpetual_market import CHANNELS, HISTORY_LIMIT, OKX_CANDLES_WS, MarketError, closed_windows, history, instrument_rules, now_ms, parse_candle, quote
 from .perpetual_outcomes import SignalOutcomes, entry_second
@@ -27,7 +29,7 @@ from .perpetual_strategy import PROFILES, detect_setup, detect_trend_setup, exit
 from .perpetual_trade import TradeAgent
 
 MINUTE = TIMEFRAMES["1m"]
-FIXED_STRATEGIES = {BTC_STRATEGY: BTC_POLICY, COMPRESSION_STRATEGY: COMPRESSION_POLICY, DUAL_STRATEGY: DUAL_POLICY, **MACRO_POLICIES}
+FIXED_STRATEGIES = {BTC_STRATEGY: BTC_POLICY, COMPRESSION_STRATEGY: COMPRESSION_POLICY, DUAL_STRATEGY: DUAL_POLICY, AUTO_REGIME_STRATEGY: AUTO_REGIME_POLICY, **MACRO_POLICIES}
 logger = logging.getLogger(__name__)
 
 
@@ -218,9 +220,9 @@ class PerpetualMonitor:
         timeframes = {"1m", "15m", "1h"}
         if self.fixed_policy:
             timeframes.add("30m")
-        if self.selected_strategy in (BTC_STRATEGY, DUAL_STRATEGY, *MACRO_STRATEGIES):
+        if self.selected_strategy in (BTC_STRATEGY, DUAL_STRATEGY, AUTO_REGIME_STRATEGY, *MACRO_STRATEGIES):
             timeframes.add("4h")
-        if self.selected_strategy in MACRO_STRATEGIES:
+        if self.selected_strategy in (AUTO_REGIME_STRATEGY, *MACRO_STRATEGIES):
             timeframes.add("1d")
         windows = closed_windows({tf: rows for tf, rows in self.bars.items() if tf in timeframes}, end)
         if windows is None:
@@ -237,6 +239,8 @@ class PerpetualMonitor:
             analysis["setup"] = dual_engine_setup(windows)
         elif self.selected_strategy in MACRO_STRATEGIES:
             analysis["setup"] = macro_a1_setup(windows, self.selected_strategy)
+        elif self.selected_strategy == AUTO_REGIME_STRATEGY:
+            analysis["setup"] = auto_regime_setup(windows)
         setup = analysis["setup"]
         self.evaluation = {"closed_at": end, **analysis}
         self.market_note = "策略已计算最新收盘 K 线"
@@ -248,7 +252,7 @@ class PerpetualMonitor:
             return
         if self.fixed_policy:
             if end == setup["closed_at"]:
-                trigger = setup["timeframe"] if self.selected_strategy in (BTC_STRATEGY, DUAL_STRATEGY, *MACRO_STRATEGIES) else "30m"
+                trigger = setup["timeframe"] if self.selected_strategy in (BTC_STRATEGY, DUAL_STRATEGY, AUTO_REGIME_STRATEGY, *MACRO_STRATEGIES) else "30m"
                 self.queue_review(end, windows[trigger][-1], analysis, "等待收盘后一分钟的入场盘口")
             return
         _, policy_id, _ = PROFILES[self.profile]
@@ -293,6 +297,8 @@ class PerpetualMonitor:
             return dual_signal_candidate(self.instrument, setup, market_quote, self.rules, published_at)
         if policy.strategy in MACRO_STRATEGIES:
             return macro_a1_signal_candidate(self.instrument, policy.strategy, setup, market_quote, self.rules, published_at)
+        if policy.strategy == AUTO_REGIME_STRATEGY:
+            return auto_regime_signal_candidate(self.instrument, setup, market_quote, self.rules, published_at)
         return fixed_signal_candidate(policy, setup, market_quote, self.rules, published_at)
 
     async def review(self, job):
@@ -355,7 +361,7 @@ class PerpetualMonitor:
             if outcome is None or outcome["status"] == "unverified":
                 self.review_state.update(status="wait", note="这套策略有一笔信号仍在追踪")
                 return
-            cooldown = (setup["cooldown_minutes"] if policy.strategy in MACRO_STRATEGIES
+            cooldown = (setup["cooldown_minutes"] if policy.strategy in (AUTO_REGIME_STRATEGY, *MACRO_STRATEGIES)
                         else DUAL_COOLDOWN_MINUTES if policy.strategy == DUAL_STRATEGY else FIXED_COOLDOWN_MINUTES)
             if end - previous["closed_at"] < cooldown * MINUTE:
                 self.review_state.update(status="wait", note="上一条信号仍在冷却期")

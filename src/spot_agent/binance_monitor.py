@@ -18,11 +18,13 @@ from .perpetual_macro import (MACRO_A1_AGGRESSIVE, MACRO_A1_STEADY, MACRO_PROFIL
 from .perpetual_market import HISTORY_LIMIT, MarketError
 from .perpetual_monitor import PerpetualMonitor, SignalJournal
 from .perpetual_regime_terms import LEVERAGE, fixed_signal_candidate
+from .perpetual_router import (AUTO_REGIME_STRATEGY, ROUTER_S10_RISK_PERCENT,
+                               auto_regime_signal_candidate)
 
-STRATEGIES = {BTC_INSTRUMENT: DUAL_STRATEGY, COMPRESSION_INSTRUMENT: DUAL_STRATEGY}
+STRATEGIES = {BTC_INSTRUMENT: AUTO_REGIME_STRATEGY, COMPRESSION_INSTRUMENT: AUTO_REGIME_STRATEGY}
 ALLOWED_STRATEGIES = {
-    BTC_INSTRUMENT: (DUAL_STRATEGY, MACRO_A1_AGGRESSIVE, MACRO_A1_STEADY, BTC_STRATEGY),
-    COMPRESSION_INSTRUMENT: (DUAL_STRATEGY, MACRO_A1_AGGRESSIVE, MACRO_A1_STEADY, COMPRESSION_STRATEGY),
+    BTC_INSTRUMENT: (AUTO_REGIME_STRATEGY, DUAL_STRATEGY, MACRO_A1_AGGRESSIVE, MACRO_A1_STEADY, BTC_STRATEGY),
+    COMPRESSION_INSTRUMENT: (AUTO_REGIME_STRATEGY, DUAL_STRATEGY, MACRO_A1_AGGRESSIVE, MACRO_A1_STEADY, COMPRESSION_STRATEGY),
 }
 
 
@@ -90,6 +92,8 @@ class BinanceMonitor(PerpetualMonitor):
             return dual_signal_candidate(self.instrument, setup, market_quote, self.rules, published_at, binance=True)
         if policy.strategy in MACRO_STRATEGIES:
             return macro_a1_signal_candidate(self.instrument, policy.strategy, setup, market_quote, self.rules, published_at, binance=True)
+        if policy.strategy == AUTO_REGIME_STRATEGY:
+            return auto_regime_signal_candidate(self.instrument, setup, market_quote, self.rules, published_at, binance=True)
         candidate, issue = fixed_signal_candidate(policy, setup, market_quote, self.rules, published_at, binance=True)
         if candidate is None:
             return None, issue
@@ -110,7 +114,12 @@ class BinanceMonitor(PerpetualMonitor):
 
     def view(self):
         result = super().view()
-        if self.selected_strategy in MACRO_PROFILES:
+        if self.selected_strategy == AUTO_REGIME_STRATEGY:
+            regime = (self.evaluation or {}).get("setup", {}).get("regime")
+            lev = regime["active_leverage"] if regime else int(MACRO_PROFILES[MACRO_A1_AGGRESSIVE].leverage)
+            risk = regime["active_risk_percent"] if regime else float(ROUTER_S10_RISK_PERCENT)
+            result.update(execution_mode=self.settings.mode, risk_percent=risk, leverage=lev, margin_percent=None)
+        elif self.selected_strategy in MACRO_PROFILES:
             profile = MACRO_PROFILES[self.selected_strategy]
             result.update(execution_mode=self.settings.mode, risk_percent=float(profile.risk_percent),
                           leverage=int(profile.leverage), margin_percent=None)

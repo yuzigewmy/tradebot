@@ -17,6 +17,7 @@ from .contracts import AnalyzeInput, TIMEFRAMES
 from .perpetual_dual import DUAL_LEVERAGE, DUAL_MARGIN_PERCENT, DUAL_MAX_STOP_PCT
 from .perpetual_macro import MACRO_PROFILES
 from .perpetual_market import MarketError, closed_windows, now_ms
+from .perpetual_router import AUTO_REGIME_STRATEGY
 from .perpetual_strategy import detect_trend_setup
 from .service import ROOT, analyze
 
@@ -30,7 +31,8 @@ STRATEGIES = {"pullback": "旧版趋势回踩", "breakout": "旧版收缩放量�
               "eth_compression_short": "30 分钟波动收缩做空", "btc_trend_reclaim": "BTC 多周期均线确认",
               "dual_trend_engine": "S10 双引擎顺势",
               "macro_a1_aggressive": "A1 宏观双引擎 · 激进版",
-              "macro_a1_steady": "A1 宏观双引擎 · 稳健版"}
+              "macro_a1_steady": "A1 宏观双引擎 · 稳健版",
+              "auto_regime_router": "自动切换 A（强单边 S10 / 震荡 A1）"}
 ENGINES = {"s4_pullback": "S4 顺势回踩", "s3_keltner": "S3 通道突破",
            "m3_4h_supertrend": "M3 4H超趋势", "m5_1d_donchian": "M5 1D唐奇安CTA"}
 
@@ -220,8 +222,28 @@ class WechatResearch:
                                 f"单笔风险 {p.risk_percent}% × {int(p.leverage)} 倍逐仓（名义上限 {p.max_notional_multiple} 倍，"
                                 f"止损上限 {p.max_stop_pct * 100:.1f}%），带 1.5R 保本与移动止损"
                             )
+                        elif m.selected_strategy == AUTO_REGIME_STRATEGY:
+                            regime = (m.evaluation or {}).get("setup", {}).get("regime")
+                            if regime:
+                                item["regime"] = regime
+                                item["strategy_detail"] = (
+                                    f"自动切换 A：当前识别为「{regime['label']}」（1D ADX {regime['d1_adx']} / 4H ADX {regime['h4_adx']} / "
+                                    f"1D-4H {'同向' if regime['aligned'] else '分歧'}），强单边(1D ADX≥25 且 4H ADX≥22 且同向)自动走 S10 8%风险×30倍，"
+                                    f"震荡盘自动切 A1 激进 8%风险×15倍"
+                                )
+                            else:
+                                item["strategy_detail"] = "自动切换 A：强单边自动走 S10(8%风险×30倍)，震荡盘自动切 A1 激进(8%风险×15倍)，等待收盘计算"
                         if exec_mode in ("demo", "live"):
-                            if m.selected_strategy in MACRO_PROFILES:
+                            if m.selected_strategy == AUTO_REGIME_STRATEGY:
+                                regime = (m.evaluation or {}).get("setup", {}).get("regime")
+                                if regime:
+                                    item["sizing"] = (
+                                        f"当前 {regime['label']} · 单笔止损风险 {regime['active_risk_percent']:g}% × "
+                                        f"{regime['active_leverage']} 倍逐仓（名义敞口上限 {regime['active_max_notional']:g} 倍）"
+                                    )
+                                else:
+                                    item["sizing"] = "自动切换：强单边 8%×30倍 / 震荡盘 8%×15倍逐仓"
+                            elif m.selected_strategy in MACRO_PROFILES:
                                 p = MACRO_PROFILES[m.selected_strategy]
                                 item["sizing"] = f"单笔止损风险 {p.risk_percent}% × {int(p.leverage)} 倍逐仓（名义敞口上限 {p.max_notional_multiple} 倍）"
                             else:

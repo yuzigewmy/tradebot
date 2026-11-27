@@ -8,6 +8,7 @@ from spot_agent.perpetual_macro import (
     MACRO_A1_AGGRESSIVE, MACRO_A1_STEADY, MACRO_PROFILES,
     macro_a1_setup, macro_a1_signal_candidate,
 )
+from spot_agent.perpetual_router import AUTO_REGIME_STRATEGY
 
 
 def _bars(timeframe, count, end, *, start_price=100.0, step=0.5, spread=0.6):
@@ -20,9 +21,10 @@ def _bars(timeframe, count, end, *, start_price=100.0, step=0.5, spread=0.6):
     return rows
 
 
-def test_default_live_strategy_remains_s10_while_a1_variants_are_selectable():
-    assert STRATEGIES == {"BTC-USDT-SWAP": DUAL_STRATEGY, "ETH-USDT-SWAP": DUAL_STRATEGY}
+def test_default_live_strategy_remains_auto_router_while_s10_and_a1_variants_are_selectable():
+    assert STRATEGIES == {"BTC-USDT-SWAP": AUTO_REGIME_STRATEGY, "ETH-USDT-SWAP": AUTO_REGIME_STRATEGY}
     for inst in ("BTC-USDT-SWAP", "ETH-USDT-SWAP"):
+        assert DUAL_STRATEGY in ALLOWED_STRATEGIES[inst]
         assert MACRO_A1_AGGRESSIVE in ALLOWED_STRATEGIES[inst]
         assert MACRO_A1_STEADY in ALLOWED_STRATEGIES[inst]
 

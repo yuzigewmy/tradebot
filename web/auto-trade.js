@@ -3,6 +3,7 @@ const clock = new Intl.DateTimeFormat("zh-CN", {month: "2-digit", day: "2-digit"
 const price = new Intl.NumberFormat("zh-CN", {maximumFractionDigits: 8});
 const environments = {live: "币安实盘", demo: "币安 Demo", quotes: "币安行情", off: "OKX 模拟"};
 const strategies = {
+  auto_regime_router: "自动切换 A（强单边 S10·30× / 震荡 A1·15×）",
   dual_trend_engine: "S10 双引擎顺势（回踩 + 突破 · 30×）",
   macro_a1_aggressive: "A1 宏观双引擎 · 激进版（4H超趋势 + 1D唐奇安 · 15×）",
   macro_a1_steady: "A1 宏观双引擎 · 稳健版（4H超趋势 + 1D唐奇安 · 10×）",
