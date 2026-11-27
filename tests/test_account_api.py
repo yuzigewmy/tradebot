@@ -38,6 +38,14 @@ def test_income_keeps_transfers_separate_and_uses_beijing_dates():
     assert data["daily"][-1]["date"] == "2026-11-25"
     assert data["totals"]["transfer"] == 22
     assert data["totals"]["realized"] + data["totals"]["commission"] == Decimal("1.85")
+    with_bal = analyze_income([sample | {"incomeType": "TRANSFER", "income": "22"},
+                               sample | {"incomeType": "COMMISSION", "income": "-0.15"},
+                               sample | {"incomeType": "REALIZED_PNL", "income": "2"}],
+                              income_window(stamp), wallet_balance=Decimal("50"))
+    curve = with_bal["balance_curve"]
+    assert curve[0]["label"] == "期初" and curve[0]["balance"] == Decimal("26.15")
+    assert curve[-1]["date"] == "2026-11-25" and curve[-1]["balance"] == Decimal("50")
+    assert curve[-1]["cum_trade"] == Decimal("1.85")
 
 
 def test_account_data_requires_local_same_origin_and_cannot_be_cached():

@@ -15,7 +15,10 @@ const signed = (amount) => `${Number(amount) > 0 ? "+" : ""}${format(amount)}`;
 const pct = (amount) => amount == null ? "—" : `${Number(amount).toFixed(2)}%`;
 const time = (stamp) => `${clock.format(stamp)} 北京时间`;
 let currentRisk;
+let currentRate = null;
 let dailyHistory;
+let balanceCurve = null;
+let curveMode = "balance";
 
 function tone(element, value) {
   element.dataset.sign = Number(value) > 0 ? "positive" : Number(value) < 0 ? "negative" : "zero";
@@ -45,6 +48,8 @@ function drawShock() {
 
 function renderSnapshot({mode, as_of: stamp, wallet, assets, positions, risk, order_plan: plan, fx}) {
   const rate = fx ? fx.usd_cny : null;
+  currentRate = rate;
+  if (balanceCurve) drawBalanceCurve();
   const fxNote = rate == null ? "" : ` · 1 USDT ≈ ${format(rate)} CNY`;
   el("account-source").textContent = mode === "live" ? "币安实盘 · U 本位合约" : "币安 Demo · U 本位合约";
   el("snapshot-status").textContent = `更新于 ${time(stamp)} · 每 5 秒刷新${fxNote}`;
@@ -112,7 +117,75 @@ function drawIncome() {
   }));
 }
 
-function renderIncome({as_of: stamp, totals, daily, incomplete}) {
+function drawBalanceCurve(activeIndex = null) {
+  const block = el("balance-chart-block");
+  if (!balanceCurve || !balanceCurve.length) {
+    block.hidden = true;
+    return;
+  }
+  block.hidden = false;
+  const values = balanceCurve.map((p) => Number(p[curveMode]));
+  const latestIdx = activeIndex ?? values.length - 1;
+  const activePoint = balanceCurve[latestIdx];
+  const activeVal = values[latestIdx];
+  const signedMode = curveMode === "cum_trade";
+  const usdtText = `${signedMode ? signed(activeVal) : format(activeVal)} USDT`;
+  const cnyText = currentRate == null ? "" : ` (${formatCny(activeVal, currentRate, signedMode)})`;
+  el("balance-readout").textContent = `${activePoint.label} · ${usdtText}${cnyText}`;
+  tone(el("balance-readout"), signedMode ? activeVal : 0);
+
+  const W = 820, H = 188, padL = 62, padR = 22, padT = 16, padB = 26;
+  const pw = W - padL - padR, ph = H - padT - padB;
+  let minY = Math.min(...values), maxY = Math.max(...values);
+  if (signedMode) { minY = Math.min(minY, 0); maxY = Math.max(maxY, 0); }
+  const span = maxY - minY || Math.max(Math.abs(maxY) * 0.2, 1);
+  minY -= span * 0.14;
+  maxY += span * 0.16;
+
+  const xOf = (i) => padL + (i / Math.max(1, values.length - 1)) * pw;
+  const yOf = (v) => padT + ph - ((v - minY) / (maxY - minY)) * ph;
+  const delta = values[values.length - 1] - values[0];
+  const stroke = delta > 0 ? "var(--positive)" : delta < 0 ? "var(--negative)" : "var(--primary)";
+
+  const pts = values.map((v, i) => [xOf(i), yOf(v)]);
+  const linePath = pts.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const areaPath = `${linePath} L${pts[pts.length - 1][0].toFixed(1)},${(padT + ph).toFixed(1)} L${pts[0][0].toFixed(1)},${(padT + ph).toFixed(1)} Z`;
+
+  const gridLines = [0, 0.5, 1].map((f) => {
+    const val = minY + (maxY - minY) * f;
+    const y = yOf(val).toFixed(1);
+    return `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="var(--line)" stroke-dasharray="3 3" />`
+      + `<text x="${padL - 8}" y="${Number(y) + 4}" text-anchor="end" font-size="10.5" font-family="var(--mono)" fill="var(--muted)">${Number(val.toFixed(2))}</text>`;
+  }).join("");
+
+  const zeroLine = signedMode
+    ? `<line x1="${padL}" y1="${yOf(0).toFixed(1)}" x2="${W - padR}" y2="${yOf(0).toFixed(1)}" stroke="var(--line-strong)" stroke-width="1.2" />`
+    : "";
+
+  const xLabels = balanceCurve.map((p, i) =>
+    `<text x="${xOf(i).toFixed(1)}" y="${H - 6}" text-anchor="middle" font-size="10.5" font-family="var(--mono)" fill="var(--muted)">${p.label}</text>`
+  ).join("");
+
+  const circles = pts.map(([x, y], i) => {
+    const isSelected = i === latestIdx;
+    return `<circle class="curve-point" data-idx="${i}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${isSelected ? 5 : 3.5}" fill="${isSelected ? stroke : "var(--panel)"}" stroke="${stroke}" stroke-width="2" />`;
+  }).join("");
+
+  const container = el("balance-chart");
+  container.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="资金变化折线图">`
+    + `<defs><linearGradient id="bal-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${stroke}" stop-opacity="0.16"/><stop offset="100%" stop-color="${stroke}" stop-opacity="0.01"/></linearGradient></defs>`
+    + gridLines + zeroLine
+    + `<path d="${areaPath}" fill="url(#bal-fill)" />`
+    + `<path d="${linePath}" fill="none" stroke="${stroke}" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round" />`
+    + xLabels + circles + `</svg>`;
+
+  container.querySelectorAll(".curve-point").forEach((dot) => {
+    dot.addEventListener("mouseenter", () => drawBalanceCurve(Number(dot.dataset.idx)));
+    dot.addEventListener("click", () => drawBalanceCurve(Number(dot.dataset.idx)));
+  });
+}
+
+function renderIncome({as_of: stamp, totals, daily, incomplete, balance_curve: curve}) {
   const values = {trade: tradeNet(totals), ...totals};
   el("income-summary").replaceChildren(...Object.entries(incomeLabels).map(([key, label]) => {
     const cell = document.createElement("div");
@@ -126,9 +199,11 @@ function renderIncome({as_of: stamp, totals, daily, incomplete}) {
   }));
   el("income-status").textContent = `更新于 ${time(stamp)}`;
   el("income-note").textContent = incomplete
-    ? "币安返回的流水达到读取上限，合计只覆盖已读取记录。"
+    ? "币安返回的流水达到读取上限，合计只覆盖已读取记录，历史余额折线已隐藏。"
     : "交易净额 = 已实现盈亏 + 手续费 + 资金费。净划转和其他流水单列。";
   dailyHistory = daily;
+  balanceCurve = curve || null;
+  drawBalanceCurve();
   drawIncome();
   el("income-content").hidden = false;
 }
@@ -153,5 +228,10 @@ async function poll(path, render, status, errorNode, interval) {
 
 el("shock").addEventListener("input", drawShock);
 el("income-metric").addEventListener("change", drawIncome);
+document.querySelectorAll("[data-curve]").forEach((btn) => btn.addEventListener("click", () => {
+  curveMode = btn.dataset.curve;
+  document.querySelectorAll("[data-curve]").forEach((b) => b.setAttribute("aria-pressed", String(b === btn)));
+  drawBalanceCurve();
+}));
 poll("/api/account", renderSnapshot, "snapshot-status", "account-error", 5000);
 poll("/api/account/income", renderIncome, "income-status", "income-error", 60000);

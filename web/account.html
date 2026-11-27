@@ -7,8 +7,8 @@
   <title>账户 · 加密研究台</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/styles.css?v=2">
-  <link rel="stylesheet" href="/static/account.css?v=3">
-  <script defer src="/static/account.js?v=3"></script>
+  <link rel="stylesheet" href="/static/account.css?v=4">
+  <script defer src="/static/account.js?v=4"></script>
 </head>
 <body>
   <header class="app-header">
@@ -76,6 +76,19 @@
         <p class="error" id="income-error" role="status" hidden></p>
         <div id="income-content" hidden>
           <dl class="income-summary" id="income-summary"></dl>
+          <div class="balance-chart-block" id="balance-chart-block" hidden>
+            <div class="balance-chart-header">
+              <div class="balance-chart-title">
+                <h3>近 7 天资金变化折线</h3>
+                <div class="curve-switch" role="group" aria-label="折线口径">
+                  <button type="button" data-curve="balance" aria-pressed="true">钱包余额</button>
+                  <button type="button" data-curve="cum_trade" aria-pressed="false">累计交易净额</button>
+                </div>
+              </div>
+              <p class="mono balance-readout" id="balance-readout"></p>
+            </div>
+            <div class="balance-chart-wrap" id="balance-chart" aria-label="近 7 天 USDT 资金变化折线图"></div>
+          </div>
           <div class="chart-header">
             <label>按日查看<select id="income-metric"><option value="trade">交易净额</option><option value="realized">已实现盈亏</option><option value="commission">手续费</option><option value="funding">资金费</option><option value="transfer">净划转</option></select></label>
             <p class="quiet">北京时间 · 当日截至最近一次读取</p>

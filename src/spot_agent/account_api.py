@@ -70,7 +70,7 @@ def income_window(now):
     return [date - timedelta(days=offset) for offset in range(6, -1, -1)]
 
 
-def analyze_income(rows, days):
+def analyze_income(rows, days, wallet_balance=None):
     groups = ("realized", "commission", "funding", "transfer", "other")
     daily = {day.date().isoformat(): dict.fromkeys(groups, Decimal(0)) for day in days}
     for row in rows:
@@ -78,8 +78,22 @@ def analyze_income(rows, days):
             date = datetime.fromtimestamp(row["time"] / 1000, BEIJING).date().isoformat()
             daily[date][INCOME_GROUPS.get(row["incomeType"], "other")] += Decimal(row["income"])
     totals = {key: sum(item[key] for item in daily.values()) for key in groups}
-    return {"totals": totals, "daily": [{"date": date, **values} for date, values in daily.items()],
-            "incomplete": len(rows) == INCOME_LIMIT}
+    incomplete = len(rows) == INCOME_LIMIT
+    daily_rows = [{"date": date, **values} for date, values in daily.items()]
+    balance_curve = None
+    if wallet_balance is not None and not incomplete:
+        running = Decimal(wallet_balance)
+        balances = []
+        for item in reversed(daily_rows):
+            balances.append(running)
+            running -= sum(item[k] for k in groups)
+        balances.reverse()
+        cum_trade = Decimal(0)
+        balance_curve = [{"label": "期初", "date": None, "balance": running, "cum_trade": Decimal(0)}]
+        for item, bal in zip(daily_rows, balances, strict=True):
+            cum_trade += item["realized"] + item["commission"] + item["funding"]
+            balance_curve.append({"label": item["date"][5:], "date": item["date"], "balance": bal, "cum_trade": cum_trade})
+    return {"totals": totals, "daily": daily_rows, "incomplete": incomplete, "balance_curve": balance_curve}
 
 
 def fetch_usd_cny():
@@ -137,8 +151,10 @@ class AccountReader:
                 data = snapshot(signed("/fapi/v3/account"), signed("/fapi/v3/positionRisk"))
             else:
                 days = income_window(server_time)
+                acct = signed("/fapi/v3/account")
+                usdt_wallet = next(Decimal(a["walletBalance"]) for a in acct["assets"] if a["asset"] == "USDT")
                 rows = signed("/fapi/v1/income", startTime=int(days[0].timestamp() * 1000), endTime=server_time, limit=INCOME_LIMIT)
-                data = analyze_income(rows, days)
+                data = analyze_income(rows, days, wallet_balance=usdt_wallet)
         return {"mode": self.settings.mode, "as_of": time_ns() // 1_000_000, **data}
 
 

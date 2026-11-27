@@ -127,6 +127,57 @@
   gap: 12px;
   margin: 18px 0 10px;
 }
+.balance-chart-block {
+  margin-top: 16px;
+  padding: 14px 16px 12px;
+  background: oklch(.993 .002 65);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+.balance-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.balance-chart-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.balance-chart-title h3 { margin: 0; font-size: 13.5px; }
+.curve-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.curve-switch button {
+  min-height: 26px;
+  padding: 2px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.curve-switch button[aria-pressed="true"] {
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 1px 2px oklch(.2 0 0 / .08);
+}
+.balance-readout { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); }
+.balance-chart-wrap { width: 100%; overflow: hidden; }
+.balance-chart-wrap svg { display: block; width: 100%; height: auto; max-height: 210px; }
+.balance-chart-wrap .curve-point { cursor: pointer; transition: r .12s ease; }
+.balance-chart-wrap .curve-point:hover { r: 6; }
 .chart-header select { min-height: 34px; padding-block: 4px; min-width: 140px; }
 
 .income-chart { list-style: none; padding: 0; margin: 0; }
