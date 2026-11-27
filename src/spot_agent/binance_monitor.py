@@ -12,6 +12,9 @@ from .binance_market import BinanceMarket
 from .binance_sdk import MARGIN_PERCENT, BinanceFutures
 from .perpetual_btc import BTC_INSTRUMENT, BTC_STRATEGY
 from .perpetual_compression import COMPRESSION_INSTRUMENT, COMPRESSION_STRATEGY
+from .perpetual_dedicated import (BTC_DAILY_DON20, BTC_SQUEEZE_DON14, DEDICATED_PROFILES,
+                                  DEDICATED_STRATEGIES, ETH_WIDE_ST_DON14, SOL_DAILY_ST30,
+                                  dedicated_signal_candidate)
 from .perpetual_dual import DUAL_STRATEGY, dual_signal_candidate
 from .perpetual_macro import (MACRO_A1_AGGRESSIVE, MACRO_A1_STEADY, MACRO_PROFILES,
                               MACRO_STRATEGIES, macro_a1_signal_candidate)
@@ -23,14 +26,14 @@ from .perpetual_router import (AUTO_REGIME_STRATEGY, ROUTER_S10_RISK_PERCENT,
 
 SOL_INSTRUMENT = "SOL-USDT-SWAP"
 STRATEGIES = {
-    BTC_INSTRUMENT: AUTO_REGIME_STRATEGY,
-    COMPRESSION_INSTRUMENT: AUTO_REGIME_STRATEGY,
-    SOL_INSTRUMENT: AUTO_REGIME_STRATEGY,
+    BTC_INSTRUMENT: BTC_SQUEEZE_DON14,
+    COMPRESSION_INSTRUMENT: ETH_WIDE_ST_DON14,
+    SOL_INSTRUMENT: SOL_DAILY_ST30,
 }
 ALLOWED_STRATEGIES = {
-    BTC_INSTRUMENT: (AUTO_REGIME_STRATEGY, DUAL_STRATEGY, MACRO_A1_AGGRESSIVE, MACRO_A1_STEADY, BTC_STRATEGY),
-    COMPRESSION_INSTRUMENT: (AUTO_REGIME_STRATEGY, DUAL_STRATEGY, MACRO_A1_AGGRESSIVE, MACRO_A1_STEADY, COMPRESSION_STRATEGY),
-    SOL_INSTRUMENT: (AUTO_REGIME_STRATEGY, DUAL_STRATEGY, MACRO_A1_AGGRESSIVE, MACRO_A1_STEADY),
+    BTC_INSTRUMENT: (BTC_SQUEEZE_DON14, BTC_DAILY_DON20, AUTO_REGIME_STRATEGY, DUAL_STRATEGY, MACRO_A1_AGGRESSIVE, MACRO_A1_STEADY, BTC_STRATEGY),
+    COMPRESSION_INSTRUMENT: (ETH_WIDE_ST_DON14, AUTO_REGIME_STRATEGY, DUAL_STRATEGY, MACRO_A1_AGGRESSIVE, MACRO_A1_STEADY, COMPRESSION_STRATEGY),
+    SOL_INSTRUMENT: (SOL_DAILY_ST30, AUTO_REGIME_STRATEGY, DUAL_STRATEGY, MACRO_A1_AGGRESSIVE, MACRO_A1_STEADY),
 }
 
 
@@ -100,6 +103,8 @@ class BinanceMonitor(PerpetualMonitor):
             return macro_a1_signal_candidate(self.instrument, policy.strategy, setup, market_quote, self.rules, published_at, binance=True)
         if policy.strategy == AUTO_REGIME_STRATEGY:
             return auto_regime_signal_candidate(self.instrument, setup, market_quote, self.rules, published_at, binance=True)
+        if policy.strategy in DEDICATED_STRATEGIES:
+            return dedicated_signal_candidate(self.instrument, policy.strategy, setup, market_quote, self.rules, published_at, binance=True)
         candidate, issue = fixed_signal_candidate(policy, setup, market_quote, self.rules, published_at, binance=True)
         if candidate is None:
             return None, issue
@@ -125,6 +130,10 @@ class BinanceMonitor(PerpetualMonitor):
             lev = regime["active_leverage"] if regime else int(MACRO_PROFILES[MACRO_A1_AGGRESSIVE].leverage)
             risk = regime["active_risk_percent"] if regime else float(ROUTER_S10_RISK_PERCENT)
             result.update(execution_mode=self.settings.mode, risk_percent=risk, leverage=lev, margin_percent=None)
+        elif self.selected_strategy in DEDICATED_PROFILES:
+            profile = DEDICATED_PROFILES[self.selected_strategy]
+            result.update(execution_mode=self.settings.mode, risk_percent=float(profile.risk_percent),
+                          leverage=int(profile.leverage), margin_percent=None)
         elif self.selected_strategy in MACRO_PROFILES:
             profile = MACRO_PROFILES[self.selected_strategy]
             result.update(execution_mode=self.settings.mode, risk_percent=float(profile.risk_percent),

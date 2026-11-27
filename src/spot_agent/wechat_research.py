@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from .agent import AgentError, astream_response, model_configured, responses_config
 from .contracts import AnalyzeInput, TIMEFRAMES
+from .perpetual_dedicated import DEDICATED_PROFILES
 from .perpetual_dual import DUAL_LEVERAGE, DUAL_MARGIN_PERCENT, DUAL_MAX_STOP_PCT
 from .perpetual_macro import MACRO_PROFILES
 from .perpetual_market import MarketError, closed_windows, now_ms
@@ -32,9 +33,12 @@ STRATEGIES = {"pullback": "旧版趋势回踩", "breakout": "旧版收缩放量�
               "dual_trend_engine": "S10 双引擎顺势",
               "macro_a1_aggressive": "A1 宏观双引擎 · 激进版",
               "macro_a1_steady": "A1 宏观双引擎 · 稳健版",
-              "auto_regime_router": "自动切换 A（强单边 S10 / 震荡 A1）"}
+              "auto_regime_router": "自动切换 A（强单边 S10 / 震荡 A1）",
+              **{key: profile.label for key, profile in DEDICATED_PROFILES.items()}}
 ENGINES = {"s4_pullback": "S4 顺势回踩", "s3_keltner": "S3 通道突破",
-           "m3_4h_supertrend": "M3 4H超趋势", "m5_1d_donchian": "M5 1D唐奇安CTA"}
+           "m3_4h_supertrend": "M3 4H超趋势", "m5_1d_donchian": "M5 1D唐奇安CTA",
+           "m7_4h_squeeze": "4H TTM压缩突破", "m2_1d_donchian20": "1D 唐奇安20 慢速海龟",
+           "m7_4h_st14_38": "4H 宽超趋势 ST(14,3.8)", "m4_1d_st30": "1D 宽超趋势 ST(10,3.0)"}
 
 
 def time_label(ts):
@@ -215,6 +219,9 @@ class WechatResearch:
                                 f"固定钱包余额 {DUAL_MARGIN_PERCENT}% 保证金 × {int(DUAL_LEVERAGE)} 倍逐仓（名义敞口 {DUAL_MARGIN_PERCENT * int(DUAL_LEVERAGE) / 100:g} 倍），"
                                 f"止损上限 {DUAL_MAX_STOP_PCT * 100:.1f}%（严守强平安全垫），最长持仓 48 小时并带保本/移动止损"
                             )
+                        elif m.selected_strategy in DEDICATED_PROFILES:
+                            p = DEDICATED_PROFILES[m.selected_strategy]
+                            item["strategy_detail"] = p.detail
                         elif m.selected_strategy in MACRO_PROFILES:
                             p = MACRO_PROFILES[m.selected_strategy]
                             item["strategy_detail"] = (
@@ -243,6 +250,9 @@ class WechatResearch:
                                     )
                                 else:
                                     item["sizing"] = "自动切换：强单边 8%×30倍 / 震荡盘 8%×15倍逐仓"
+                            elif m.selected_strategy in DEDICATED_PROFILES:
+                                p = DEDICATED_PROFILES[m.selected_strategy]
+                                item["sizing"] = f"单笔止损风险 {p.risk_percent}% × {int(p.leverage)} 倍逐仓（名义敞口上限 {p.max_notional_multiple} 倍）"
                             elif m.selected_strategy in MACRO_PROFILES:
                                 p = MACRO_PROFILES[m.selected_strategy]
                                 item["sizing"] = f"单笔止损风险 {p.risk_percent}% × {int(p.leverage)} 倍逐仓（名义敞口上限 {p.max_notional_multiple} 倍）"

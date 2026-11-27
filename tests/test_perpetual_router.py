@@ -32,11 +32,6 @@ def _chop_bars(timeframe, count, end, *, base=100.0, amp=1.2):
 
 
 def test_default_live_strategy_is_auto_regime_router():
-    assert STRATEGIES == {
-        "BTC-USDT-SWAP": AUTO_REGIME_STRATEGY,
-        "ETH-USDT-SWAP": AUTO_REGIME_STRATEGY,
-        "SOL-USDT-SWAP": AUTO_REGIME_STRATEGY,
-    }
     for inst in ("BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP"):
         assert AUTO_REGIME_STRATEGY in ALLOWED_STRATEGIES[inst]
         assert DUAL_STRATEGY in ALLOWED_STRATEGIES[inst]

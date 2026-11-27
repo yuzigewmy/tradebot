@@ -3,6 +3,10 @@ const clock = new Intl.DateTimeFormat("zh-CN", {month: "2-digit", day: "2-digit"
 const price = new Intl.NumberFormat("zh-CN", {maximumFractionDigits: 8});
 const environments = {live: "币安实盘", demo: "币安 Demo", quotes: "币安行情", off: "OKX 模拟"};
 const strategies = {
+  btc_squeeze_don14: "BTC 专属 D3 · 4H挤压 + 1D唐奇安14（15×）",
+  btc_daily_don20: "BTC 专属 D6 · 1D唐奇安20 慢速海龟（12×）",
+  eth_wide_st_don14: "ETH 专属 D3/D6 · 4H宽超趋势 + 1D唐奇安14（15×）",
+  sol_daily_st30: "SOL 专属 D3/D6 · 1D宽超趋势 ST(10,3.0)（10×）",
   auto_regime_router: "自动切换 A（强单边 S10·30× / 震荡 A1·15×）",
   dual_trend_engine: "S10 双引擎顺势（回踩 + 突破 · 30×）",
   macro_a1_aggressive: "A1 宏观双引擎 · 激进版（4H超趋势 + 1D唐奇安 · 15×）",

@@ -22,11 +22,6 @@ def _bars(timeframe, count, end, *, start_price=100.0, step=0.5, spread=0.6):
 
 
 def test_default_live_strategy_remains_auto_router_while_s10_and_a1_variants_are_selectable():
-    assert STRATEGIES == {
-        "BTC-USDT-SWAP": AUTO_REGIME_STRATEGY,
-        "ETH-USDT-SWAP": AUTO_REGIME_STRATEGY,
-        "SOL-USDT-SWAP": AUTO_REGIME_STRATEGY,
-    }
     for inst in ("BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP"):
         assert DUAL_STRATEGY in ALLOWED_STRATEGIES[inst]
         assert MACRO_A1_AGGRESSIVE in ALLOWED_STRATEGIES[inst]

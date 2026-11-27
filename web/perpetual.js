@@ -11,10 +11,29 @@ const dualStrategy = "dual_trend_engine";
 const autoRegimeStrategy = "auto_regime_router";
 const macroAggressiveStrategy = "macro_a1_aggressive";
 const macroSteadyStrategy = "macro_a1_steady";
+const btcSqueezeStrategy = "btc_squeeze_don14";
+const btcDon20Strategy = "btc_daily_don20";
+const ethWideStStrategy = "eth_wide_st_don14";
+const solDailyStStrategy = "sol_daily_st30";
 const macroStrategies = new Set([macroAggressiveStrategy, macroSteadyStrategy]);
-const strategyPeriods = {[autoRegimeStrategy]: "4h", [dualStrategy]: "1h", [macroAggressiveStrategy]: "4h", [macroSteadyStrategy]: "4h", [compressionStrategy]: "30m", [btcStrategy]: "1h"};
-const setups = {[autoRegimeStrategy]: "自动切换 A", [dualStrategy]: "S10 双引擎顺势", [macroAggressiveStrategy]: "A1 宏观双引擎 · 激进版", [macroSteadyStrategy]: "A1 宏观双引擎 · 稳健版", [btcStrategy]: "BTC 多周期均线确认", [compressionStrategy]: "30 分钟波动收缩做空", pullback: "旧版趋势回踩", breakout: "旧版收缩放量突破", trend_pullback: "十五分钟趋势回踩", channel_breakout: "十五分钟区间突破"};
-const engines = {s4_pullback: "S4 顺势回踩", s3_keltner: "S3 通道突破", m3_4h_supertrend: "M3 4H超趋势", m5_1d_donchian: "M5 1D唐奇安CTA"};
+const dedicatedStrategies = new Set([btcSqueezeStrategy, btcDon20Strategy, ethWideStStrategy, solDailyStStrategy]);
+const strategyPeriods = {
+  [btcSqueezeStrategy]: "4h", [btcDon20Strategy]: "1d", [ethWideStStrategy]: "4h", [solDailyStStrategy]: "1d",
+  [autoRegimeStrategy]: "4h", [dualStrategy]: "1h", [macroAggressiveStrategy]: "4h", [macroSteadyStrategy]: "4h",
+  [compressionStrategy]: "30m", [btcStrategy]: "1h",
+};
+const setups = {
+  [btcSqueezeStrategy]: "BTC 专属 D3 · 4H挤压 + 1D唐奇安", [btcDon20Strategy]: "BTC 专属 D6 · 1D唐奇安20",
+  [ethWideStStrategy]: "ETH 专属 D3/D6 · 4H宽超趋势 + 1D唐奇安", [solDailyStStrategy]: "SOL 专属 D3/D6 · 1D宽超趋势",
+  [autoRegimeStrategy]: "自动切换 A", [dualStrategy]: "S10 双引擎顺势",
+  [macroAggressiveStrategy]: "A1 宏观双引擎 · 激进版", [macroSteadyStrategy]: "A1 宏观双引擎 · 稳健版",
+  [btcStrategy]: "BTC 多周期均线确认", [compressionStrategy]: "30 分钟波动收缩做空",
+  pullback: "旧版趋势回踩", breakout: "旧版收缩放量突破", trend_pullback: "十五分钟趋势回踩", channel_breakout: "十五分钟区间突破",
+};
+const engines = {
+  s4_pullback: "S4 顺势回踩", s3_keltner: "S3 通道突破", m3_4h_supertrend: "M3 4H超趋势", m5_1d_donchian: "M5 1D唐奇安CTA",
+  m7_4h_squeeze: "4H TTM压缩突破", m2_1d_donchian20: "1D 唐奇安20", m7_4h_st14_38: "4H 宽超趋势", m4_1d_st30: "1D 宽超趋势",
+};
 const statusLabels = {stopped: "已停止", online: "行情在线", connecting: "连接中", reconnecting: "重连中", error: "监控异常"};
 const outcomeLabels = {
   take_profit: "成功 · 止盈", stop_loss: "失败 · 止损", time_limit: "到期退出",
@@ -125,16 +144,17 @@ function renderEvidence(fixedSignal) {
   const dual = snapshot.selected_strategy === dualStrategy;
   const autoRegime = snapshot.selected_strategy === autoRegimeStrategy;
   const macro = macroStrategies.has(snapshot.selected_strategy);
+  const dedicated = dedicatedStrategies.has(snapshot.selected_strategy);
   const btc = snapshot.selected_strategy === btcStrategy;
   const compression = snapshot.selected_strategy === compressionStrategy;
   const engineTag = setup?.engine && engines[setup.engine] ? `（${engines[setup.engine]}）` : "";
   const regimeBadge = autoRegime && setup?.regime ? `${setup.regime.label} · ` : "";
   const title = setup?.strategy ? `${sides[setup.side]} · ${setups[setup.strategy]}${engineTag}`
     : autoRegime ? (setup ? `${regimeBadge}${sides[setup.side]} · 等待触发` : "等待市场状态识别")
-    : (dual || macro) ? (setup ? `${sides[setup.side]} · 等待双引擎触发` : "等待双引擎评估")
+    : (dual || macro || dedicated) ? (setup ? `${sides[setup.side]} · 等待专属引擎触发` : "等待策略评估")
     : btc ? "等待多空条件" : setup ? `${sides[setup.side]} · 等待条件` : "暂无收盘评估";
   $("#setup-title").textContent = title;
-  const timeframes = (macro || autoRegime) ? ["4h", "1h", "15m"] : dual ? ["4h", "1h", "15m"] : btc ? ["4h", "1h", "30m"] : compression ? ["1h", "30m", "1m"] : ["1h", "15m", "1m"];
+  const timeframes = (macro || autoRegime || dedicated) ? ["4h", "1h", "15m"] : dual ? ["4h", "1h", "15m"] : btc ? ["4h", "1h", "30m"] : compression ? ["1h", "30m", "1m"] : ["1h", "15m", "1m"];
   $("#swap-context").replaceChildren(...(evaluation ? timeframes.filter((tf) => evaluation.context[tf]).map((tf) => {
     const values = evaluation.context[tf];
     const row = node("div");
@@ -144,7 +164,7 @@ function renderEvidence(fixedSignal) {
   }) : []));
   const setupInfo = $("#setup-info");
   setupInfo.hidden = !setup;
-  if (setup && (dual || macro || autoRegime) && setup.engines) {
+  if (setup && (dual || macro || autoRegime || dedicated) && setup.engines) {
     const rows = [];
     if (autoRegime && setup.regime) {
       const r = setup.regime;
@@ -159,15 +179,22 @@ function renderEvidence(fixedSignal) {
         return metric(`${item.label} · 1H ${clock(item.closed_at)} 北京`,
           `4H趋势 ${trend} · RSI回调 ${pb} · 复位触发 ${trig}（RSI ${item.rsi ?? "—"}）`);
       }
-      if (item.engine === "m3_4h_supertrend") {
-        const flip = item.flip_pass ? "已翻向" : "等待翻向";
+      if (item.engine === "m7_4h_squeeze") {
+        const state = item.squeeze_now ? "压缩蓄势中" : item.squeeze_released ? "已释放突破" : "常规波动";
         return metric(`${item.label} · 4H ${clock(item.closed_at)} 北京`,
-          `1D EMA50 ${trend} · 4H超趋势 ${flip}（方向 ${item.st_dir > 0 ? "多" : item.st_dir < 0 ? "空" : "—"}）`);
+          `状态 ${state} · 方向 ${sides[item.side]} · 触发 ${item.active ? "通过" : "等待"}`);
       }
-      if (item.engine === "m5_1d_donchian") {
+      if (item.engine === "m3_4h_supertrend" || item.engine === "m7_4h_st14_38" || item.engine === "m4_1d_st30") {
+        const flip = item.flip_pass ? "已翻向" : "等待翻向";
+        const tfLbl = item.timeframe === "1d" ? "1D" : "4H";
+        return metric(`${item.label} · ${tfLbl} ${clock(item.closed_at)} 北京`,
+          `趋势 ${trend} · 超趋势 ${flip}（方向 ${item.st_dir > 0 ? "多" : item.st_dir < 0 ? "空" : "—"}）`);
+      }
+      if (item.engine === "m5_1d_donchian" || item.engine === "m2_1d_donchian20") {
         const brk = item.breakout_pass ? "已突破" : "等待突破";
+        const days = item.engine === "m2_1d_donchian20" ? "20日" : "14日";
         return metric(`${item.label} · 1D ${clock(item.closed_at)} 北京`,
-          `1D EMA50 ${trend} · 14日通道 ${brk}（${item.don_low != null ? price(item.don_low) : "—"} ~ ${item.don_high != null ? price(item.don_high) : "—"}）`);
+          `1D EMA50 ${trend} · ${days}通道 ${brk}（${item.don_low != null ? price(item.don_low) : "—"} ~ ${item.don_high != null ? price(item.don_high) : "—"}）`);
       }
       const brk = item.breakout_pass ? "通过" : "等待";
       const vol = item.volume_pass ? "通过" : "等待";
@@ -294,6 +321,10 @@ function selectPeriod(value) {
 function syncInstrumentControls() {
   const inst = $("#instrument").value;
   const binance = snapshot?.exchange === "Binance";
+  $(`#strategy-select [value="${btcSqueezeStrategy}"]`).disabled = inst !== "BTC-USDT-SWAP";
+  $(`#strategy-select [value="${btcDon20Strategy}"]`).disabled = inst !== "BTC-USDT-SWAP";
+  $(`#strategy-select [value="${ethWideStStrategy}"]`).disabled = inst !== "ETH-USDT-SWAP";
+  $(`#strategy-select [value="${solDailyStStrategy}"]`).disabled = inst !== "SOL-USDT-SWAP";
   $(`#strategy-select [value="${autoRegimeStrategy}"]`).disabled = false;
   $(`#strategy-select [value="${dualStrategy}"]`).disabled = false;
   $(`#strategy-select [value="${macroAggressiveStrategy}"]`).disabled = false;
