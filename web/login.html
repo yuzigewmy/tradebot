@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>身份验证 · 加密研究台</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/styles.css?v=3">
+  <link rel="stylesheet" href="/static/login.css?v=1">
+  <script defer src="/static/login.js?v=1"></script>
+</head>
+<body class="login-body">
+  <div class="login-shell">
+    <aside class="login-stage" aria-label="系统概览">
+      <div class="stage-grid" aria-hidden="true"></div>
+      <div class="stage-glow" aria-hidden="true"></div>
+
+      <header class="stage-top">
+        <div class="stage-brand">
+          <span class="stage-mark" aria-hidden="true">≋</span>
+          <div class="stage-brand-text">
+            <strong>加密研究台</strong>
+            <span>QUANT EXECUTION DESK</span>
+          </div>
+        </div>
+        <div class="stage-status" id="stage-status" role="status">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="stage-status-label">正在检查节点状态</span>
+        </div>
+      </header>
+
+      <div class="stage-visual">
+        <div class="telemetry-head">
+          <div class="telemetry-legend" aria-label="独立策略引擎">
+            <span class="legend-item"><i class="swatch swatch-btc" aria-hidden="true"></i>BTC · 4H 挤压突破</span>
+            <span class="legend-item"><i class="swatch swatch-eth" aria-hidden="true"></i>ETH · 4H 宽超趋势</span>
+            <span class="legend-item"><i class="swatch swatch-sol" aria-hidden="true"></i>SOL · 1D 宽超趋势</span>
+          </div>
+          <span class="telemetry-readout mono" id="stage-coord">CLOSED-BAR ENGINE · D3</span>
+        </div>
+        <div class="canvas-frame">
+          <canvas id="regime-canvas" aria-hidden="true"></canvas>
+          <div class="canvas-axis-y mono" aria-hidden="true">
+            <span>+2.4σ</span>
+            <span>+1.2σ</span>
+            <span>0.0σ</span>
+            <span>-1.2σ</span>
+          </div>
+          <div class="canvas-axis-x mono" aria-hidden="true">
+            <span>1D DONCHIAN</span>
+            <span>4H REGIME</span>
+            <span>TA-LIB DETERMINISTIC</span>
+            <span>UTC SYNC</span>
+          </div>
+        </div>
+      </div>
+
+      <footer class="stage-footer">
+        <div class="stage-copy">
+          <h1>确定性规则，全天候实盘执行。</h1>
+          <p>所有正式信号均严格基于已收盘 K 线与确定性指标计算，三币独立风控、逐仓隔离运行。</p>
+        </div>
+        <dl class="stage-specs">
+          <div>
+            <dt>交易通道</dt>
+            <dd class="mono">Binance USDⓈ-M</dd>
+          </div>
+          <div>
+            <dt>激活策略组</dt>
+            <dd class="mono">BTC · ETH · SOL (D3)</dd>
+          </div>
+          <div>
+            <dt>会话保护</dt>
+            <dd class="mono">HMAC · HttpOnly</dd>
+          </div>
+        </dl>
+      </footer>
+    </aside>
+
+    <main class="login-panel">
+      <div class="panel-inner">
+        <div class="mobile-brand">
+          <span class="brand-mark" aria-hidden="true">≋</span>
+          <div>
+            <strong>加密研究台</strong>
+            <span id="mobile-status-label">实盘控制台</span>
+          </div>
+        </div>
+
+        <div class="auth-header">
+          <h2>身份验证</h2>
+          <p>请输入管理员凭证，进入现货研究、永续三币监控与实盘账户面板。</p>
+        </div>
+
+        <form id="login-form" class="auth-form" method="post" action="/api/auth/login" novalidate>
+          <div class="field-group">
+            <label class="field-label" for="username">管理员账号</label>
+            <div class="input-wrap">
+              <span class="input-icon" aria-hidden="true">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="10" cy="6.5" r="3.25"/>
+                  <path d="M3.75 16.5c.8-2.9 3.3-4.5 6.25-4.5s5.45 1.6 6.25 4.5"/>
+                </svg>
+              </span>
+              <input
+                id="username"
+                name="username"
+                type="text"
+                inputmode="text"
+                autocomplete="username"
+                autocapitalize="none"
+                spellcheck="false"
+                placeholder="输入登录账号"
+                required
+                autofocus
+              >
+            </div>
+          </div>
+
+          <div class="field-group">
+            <div class="field-label-row">
+              <label class="field-label" for="password">访问密码</label>
+              <span class="caps-badge" id="caps-badge" hidden>大写锁定已开启</span>
+            </div>
+            <div class="input-wrap">
+              <span class="input-icon" aria-hidden="true">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="4" y="9" width="12" height="8" rx="2"/>
+                  <path d="M7 9V6.5a3 3 0 0 1 6 0V9"/>
+                </svg>
+              </span>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                autocomplete="current-password"
+                placeholder="输入访问密码"
+                required
+              >
+              <button
+                type="button"
+                class="toggle-vis"
+                id="toggle-password"
+                aria-label="显示密码"
+                aria-pressed="false"
+              >
+                <svg class="icon-eye" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M2.2 10s2.9-5 7.8-5 7.8 5 7.8 5-2.9 5-7.8 5-7.8-5-7.8-5Z"/>
+                  <circle cx="10" cy="10" r="2.3"/>
+                </svg>
+                <svg class="icon-eye-off" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden>
+                  <path d="M3 3l14 14"/>
+                  <path d="M8.5 5.2A7.7 7.7 0 0 1 10 5c4.9 0 7.8 5 7.8 5a13.2 13.2 0 0 1-2.5 3.1"/>
+                  <path d="M11.6 11.6a2.3 2.3 0 0 1-3.2-3.2"/>
+                  <path d="M5.1 6.7A13.1 13.1 0 0 0 2.2 10s2.9 5 7.8 5c1 0 1.9-.2 2.8-.5"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="auth-options">
+            <label class="remember-check">
+              <input id="remember" name="remember" type="checkbox" checked>
+              <span class="check-box" aria-hidden="true">
+                <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M2.5 6.2 5 8.7 9.5 3.5"/>
+                </svg>
+              </span>
+              <span>保持 7 天登录状态</span>
+            </label>
+            <span class="session-hint">签名会话保护</span>
+          </div>
+
+          <div class="auth-error" id="auth-error" role="alert" aria-live="assertive" hidden>
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="10" cy="10" r="7.5"/>
+              <path d="M10 6.5v4"/>
+              <circle cx="10" cy="13.5" r=".5" fill="currentColor"/>
+            </svg>
+            <span id="auth-error-text"></span>
+          </div>
+
+          <button class="submit-btn" id="submit-btn" type="submit">
+            <span class="submit-spinner" id="submit-spinner" aria-hidden="true" hidden></span>
+            <span class="submit-check" id="submit-check" aria-hidden="true" hidden>
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3.2 8.4 6.5 11.6 12.8 4.8"/>
+              </svg>
+            </span>
+            <span id="submit-label">进入研究台</span>
+            <span class="submit-arrow" id="submit-arrow" aria-hidden="true">→</span>
+          </button>
+        </form>
+
+        <footer class="panel-footer">
+          <span class="mono">Tradebot Console</span>
+          <span aria-hidden="true">·</span>
+          <span>非授权访问自动拦截</span>
+        </footer>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

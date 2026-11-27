@@ -2,17 +2,18 @@ import csv
 from contextlib import asynccontextmanager
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Annotated
 
 import ccxt
 from fastapi import FastAPI, Path as PathParameter, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 import httpx
 import plotly
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import __version__
@@ -22,17 +23,26 @@ from .binance_monitor import binance_monitors
 from .binance_sdk import BinanceSettings
 from .contracts import AnalyzeInput, ImportInput, InsightInput, PortfolioInput
 from .market import MarketFrame
-from .perpetual_api import INSTRUMENTS, router as perpetual_router
+from .perpetual_api import INSTRUMENTS, Instrument, MonitorOptions, router as perpetual_router
 from .perpetual_monitor import live_monitors
 from .service import ROOT, analyze, assemble, import_analysis, load_report
 from .wechat_api import router as wechat_router
 from .wechat_bridge import BindingStore, WechatBridge
 from .wechat_ilink import ILink
 from .wechat_research import WechatResearch, signal_message
+from .web_auth import (
+    WebAuthConfig,
+    authenticated_user,
+    is_public_path,
+    login_redirect_url,
+    router as auth_router,
+)
 
 @asynccontextmanager
 async def lifespan(app):
     binance = BinanceSettings.from_env()
+    autostart = (TypeAdapter(dict[Instrument, MonitorOptions]).validate_json(os.getenv("SPOT_AUTOSTART_MONITORS", "{}"))
+                 if binance.mode == "off" else {})
 
     def forward_signal(signal):
         bridge.publish(signal)
@@ -56,6 +66,8 @@ async def lifespan(app):
             if binance.mode != "off":
                 for monitor in monitors.values():
                     monitor.start("signals" if binance.trading else "observe")
+            for instrument, options in autostart.items():
+                monitors[instrument].start(options.mode, options.strategy)
             yield
         finally:
             await bridge.close()
@@ -66,6 +78,7 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost
 app.include_router(perpetual_router)
 app.include_router(wechat_router)
 app.include_router(account_router)
+app.include_router(auth_router)
 SnapshotId = Annotated[str, PathParameter(pattern=r"^[a-f0-9]{24}$")]
 logger = logging.getLogger("spot_agent")
 
@@ -75,6 +88,16 @@ async def local_origin(request: Request, call_next):
     origin = request.headers.get("origin")
     if request.method in {"POST", "DELETE"} and origin and origin != str(request.base_url).rstrip("/"):
         return JSONResponse({"error": {"code": "ORIGIN", "message": "仅接受本地页面同源请求"}}, status_code=403)
+    config = WebAuthConfig.from_env()
+    if config.enabled and not is_public_path(request.url.path) and not authenticated_user(request, config):
+        if request.url.path.startswith("/api/"):
+            response = JSONResponse({"error": {"code": "UNAUTHORIZED", "message": "请先登录加密研究台。"}}, status_code=401)
+        else:
+            response = RedirectResponse(url=login_redirect_url(request), status_code=302)
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        return response
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
