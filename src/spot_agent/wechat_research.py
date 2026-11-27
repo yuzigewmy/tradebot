@@ -90,13 +90,13 @@ class BacktestArgs(NoArguments):
 
 
 class RegistrationListArgs(NoArguments):
-    status: Literal["pending", "approved", "rejected", "all"] = "pending"
+    status: Literal["pending", "approved", "rejected", "all"]
 
 
 class ReviewRegistrationArgs(NoArguments):
     username: str
     decision: Literal["approve", "reject"]
-    note: str = ""
+    note: str
 
 
 TOOL_SCHEMAS = {

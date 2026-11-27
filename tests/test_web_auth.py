@@ -126,7 +126,10 @@ def test_registration_wechat_approval_and_account_rbac(monkeypatch, tmp_path):
 
         approved = asyncio.run(
             app.state.wechat_research.execute(
-                {"name": "review_registration", "arguments": json.dumps({"username": "alice_01", "decision": "approve"})}
+                {
+                    "name": "review_registration",
+                    "arguments": json.dumps({"username": "alice_01", "decision": "approve", "note": ""}),
+                }
             )
         )
         assert approved["ok"] is True
@@ -162,11 +165,26 @@ def test_registration_wechat_approval_and_account_rbac(monkeypatch, tmp_path):
         # BOSS revokes member via WeChat -> existing member session is immediately invalidated
         revoked = asyncio.run(
             app.state.wechat_research.execute(
-                {"name": "review_registration", "arguments": json.dumps({"username": "alice_01", "decision": "reject"})}
+                {
+                    "name": "review_registration",
+                    "arguments": json.dumps({"username": "alice_01", "decision": "reject", "note": ""}),
+                }
             )
         )
         assert revoked["user"]["status"] == "rejected"
         assert client.get("/api/health").status_code == 401
+
+
+def test_wechat_strict_tool_schemas():
+    from spot_agent.wechat_research import TOOLS
+
+    for tool in TOOLS:
+        if tool.get("type") == "function" and tool.get("strict"):
+            params = tool["parameters"]
+            props = set(params.get("properties", {}).keys())
+            req = set(params.get("required", []))
+            assert params.get("additionalProperties") is False
+            assert req == props, f"Tool {tool['name']} strict schema missing required fields: {props - req}"
 
 
 def test_auth_rate_limit(monkeypatch, tmp_path):
