@@ -196,7 +196,7 @@ def test_wechat_monitor_status_reports_live_auto_trading_and_s10_details():
     assert btc["auto_trading"] is True
     assert btc["strategy_name"] == "S10 双引擎顺势"
     assert "S4" in btc["strategy_detail"] and "S3" in btc["strategy_detail"]
-    assert "3%" in btc["sizing"] and "10 倍" in btc["sizing"]
+    assert "8%" in btc["sizing"] and "30 倍" in btc["sizing"]
 
 
 def test_chat_does_not_publish_or_remember_partial_reply(monkeypatch):

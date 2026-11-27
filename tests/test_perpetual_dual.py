@@ -51,6 +51,8 @@ def test_dual_engine_triggers_s4_pullback_and_prices_48h_candidate():
     # Must NOT cut off 2 minutes before funding settlement (48h full hold)
     assert cand["exit_at"] == end + TIMEFRAMES["1m"] + 48 * TIMEFRAMES["1h"]
     assert cand["stop_loss"] < cand["entry"] < cand["take_profit"]
+    # 30x isolated liquidation safety: stop distance must remain strictly capped <= 2.4%
+    assert abs(cand["entry"] - cand["stop_loss"]) / cand["entry"] <= 0.0245
 
 
 def test_dual_engine_triggers_s3_keltner_short_breakout():
