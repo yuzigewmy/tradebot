@@ -89,12 +89,24 @@ class BacktestArgs(NoArguments):
     strategy: Literal["all", "channel_breakout", "trend_pullback"]
 
 
+class RegistrationListArgs(NoArguments):
+    status: Literal["pending", "approved", "rejected", "all"] = "pending"
+
+
+class ReviewRegistrationArgs(NoArguments):
+    username: str
+    decision: Literal["approve", "reject"]
+    note: str = ""
+
+
 TOOL_SCHEMAS = {
     "market_snapshot": (MarketArgs, "读取最新已收盘 K 线指标、结构和趋势证据，结果标明交易所。现货有日线、四小时、一小时。永续有一小时、十五分钟、一分钟。"),
     "perpetual_quote": (AssetArgs, "读取当前数据源的 USDT 永续最新成交价、买卖一档、标记价、资金费率及时间。"),
     "recent_signals": (SignalArgs, "查询 BTC、ETH、SOL 或全部最近的正式开仓信号、有效状态、开仓参考、止盈和止损。"),
     "monitor_status": (NoArguments, "查询 BTC、ETH、SOL 永续监控是否运行、交易所与执行环境（实盘/Demo/研究）、是否已开启自动下单、当前策略与风控参数及最新收盘时间。"),
     "backtest_summary": (BacktestArgs, "读取本地最近一次指定策略的永续模拟报告。查询组合时用 all，单独查询区间突破或趋势回踩时用对应策略。"),
+    "list_registrations": (RegistrationListArgs, "查询加密研究台 Web 端用户注册申请列表（待审核 pending、已通过 approved、已拒绝 rejected 或全部 all）。"),
+    "review_registration": (ReviewRegistrationArgs, "审批加密研究台 Web 端注册申请：approve 放行并授予登录权限（不含账户栏），reject 拒绝申请或撤销已通过用户的登录权限。"),
 }
 TOOLS = [{"type": "function", "name": name, "description": description, "strict": True,
           "parameters": arguments.model_json_schema()} for name, (arguments, description) in TOOL_SCHEMAS.items()]
@@ -123,9 +135,41 @@ def format_reply(output):
 
 
 class WechatResearch:
-    def __init__(self, monitors, model_client):
+    def __init__(self, monitors, model_client, user_store=None):
         self.monitors = monitors
         self.model_client = model_client
+        self.user_store = user_store
+
+    async def compose_registration_notice(self, record):
+        note_text = record["note"] or "无"
+        fallback = (
+            f"BOSS，收到一条新的加密研究台注册申请，请审批：\n"
+            f"申请账号：{record['username']}\n"
+            f"姓名/称呼：{record['display_name']}\n"
+            f"申请说明：{note_text}\n"
+            f"提交时间：{record['created_at_beijing']}（北京时间）\n"
+            f"回复「通过 {record['username']}」放行登录（不开放账户栏），回复「拒绝 {record['username']}」驳回。"
+        )
+        if not model_configured() or self.model_client is None:
+            return fallback
+        url, headers, settings = responses_config()
+        payload = settings | {
+            "instructions": (
+                "你是 BOSS 的微信量化助手。现在有一名新用户在加密研究台提交了注册申请，"
+                "请用简洁、正式、易读的纯中文微信消息汇报给 BOSS（必须以“BOSS，”开头，不用 Markdown 表格或多余装饰），"
+                "必须准确包含申请账号、姓名/称呼、申请说明、北京时间，并明确提示 BOSS 直接回复“通过 <账号>”或“拒绝 <账号>”即可完成审批，"
+                "同时注明审核通过后的普通用户登录不展示账户栏。"
+            ),
+            "input": [{"role": "user", "content": json.dumps(record, ensure_ascii=False)}],
+            "max_output_tokens": 500,
+        }
+        try:
+            async with asyncio.timeout(25):
+                result = await astream_response(self.model_client, url, headers, payload, 22)
+            return format_reply(result["output"])
+        except (AgentError, httpx.HTTPError, TimeoutError, json.JSONDecodeError) as error:
+            log.warning("注册通知模型生成失败（%s），发送结构化原信息", type(error).__name__)
+            return fallback
 
     def active(self, signal):
         monitor = self.monitors[signal["instrument"]]
@@ -262,6 +306,18 @@ class WechatResearch:
                     return status_map
                 case "backtest_summary":
                     return self.backtest(args.strategy)
+                case "list_registrations":
+                    if self.user_store is None:
+                        return {"error": "注册用户存储未初始化"}
+                    return {"status_filter": args.status, "users": self.user_store.list_users(args.status)}
+                case "review_registration":
+                    if self.user_store is None:
+                        return {"error": "注册用户存储未初始化"}
+                    try:
+                        updated = self.user_store.review(args.username, args.decision, args.note)
+                    except KeyError as exc:
+                        return {"error": str(exc).strip("'")}
+                    return {"ok": True, "user": updated, "account_tab_visible": False}
         except (MarketError, aiohttp.ClientError, ccxt.BaseError, TimeoutError, json.JSONDecodeError) as error:
             log.warning("微信工具 %s 未取得数据（%s）", name, type(error).__name__)
             return {"error": "本次未取得该工具的数据"}

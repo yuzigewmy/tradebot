@@ -31,8 +31,11 @@ from .wechat_bridge import BindingStore, WechatBridge
 from .wechat_ilink import ILink
 from .wechat_research import WechatResearch, signal_message
 from .web_auth import (
+    UserStore,
     WebAuthConfig,
-    authenticated_user,
+    authenticated_session,
+    default_user_store_path,
+    is_account_path,
     is_public_path,
     login_redirect_url,
     router as auth_router,
@@ -55,10 +58,13 @@ async def lifespan(app):
     else:
         runtime = binance_monitors(ROOT / "data", binance, forward_signal, forward_trade)
     async with httpx.AsyncClient() as wechat_client, runtime as monitors:
-        research = WechatResearch(monitors, monitors[INSTRUMENTS[0]].model_client)
+        user_store = UserStore(default_user_store_path())
+        research = WechatResearch(monitors, monitors[INSTRUMENTS[0]].model_client, user_store=user_store)
         bridge = WechatBridge(ILink(wechat_client), BindingStore(ROOT / "data" / "wechat" / "binding.json"),
                               research.answer, signal_message, research.active)
         app.state.perpetual, app.state.wechat = monitors, bridge
+        app.state.wechat_research = research
+        app.state.user_store = user_store
         app.state.binance_mode = binance.mode
         app.state.account_reader = AccountReader(binance) if binance.trading else None
         bridge.start()
@@ -89,15 +95,26 @@ async def local_origin(request: Request, call_next):
     if request.method in {"POST", "DELETE"} and origin and origin != str(request.base_url).rstrip("/"):
         return JSONResponse({"error": {"code": "ORIGIN", "message": "仅接受本地页面同源请求"}}, status_code=403)
     config = WebAuthConfig.from_env()
-    if config.enabled and not is_public_path(request.url.path) and not authenticated_user(request, config):
-        if request.url.path.startswith("/api/"):
-            response = JSONResponse({"error": {"code": "UNAUTHORIZED", "message": "请先登录加密研究台。"}}, status_code=401)
-        else:
-            response = RedirectResponse(url=login_redirect_url(request), status_code=302)
-        response.headers["Cache-Control"] = "no-store"
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        return response
+    if config.enabled and not is_public_path(request.url.path):
+        session = authenticated_session(request, config)
+        if session is None:
+            if request.url.path.startswith("/api/"):
+                response = JSONResponse({"error": {"code": "UNAUTHORIZED", "message": "请先登录加密研究台。"}}, status_code=401)
+            else:
+                response = RedirectResponse(url=login_redirect_url(request), status_code=302)
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["X-Frame-Options"] = "DENY"
+            return response
+        if not session.is_admin and is_account_path(request.url.path):
+            if request.url.path.startswith("/api/"):
+                response = JSONResponse({"error": {"code": "FORBIDDEN", "message": "仅管理员账号可访问账户页面。"}}, status_code=403)
+            else:
+                response = RedirectResponse(url="/", status_code=302)
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["X-Frame-Options"] = "DENY"
+            return response
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"

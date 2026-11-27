@@ -1,11 +1,15 @@
 (() => {
+  const tabLogin = document.getElementById("tab-login");
+  const tabRegister = document.getElementById("tab-register");
+  const authHeader = document.getElementById("auth-header");
+  const authTitle = document.getElementById("auth-title");
+  const authSubtitle = document.getElementById("auth-subtitle");
+
   const form = document.getElementById("login-form");
   const usernameInput = document.getElementById("username");
   const passwordInput = document.getElementById("password");
   const rememberInput = document.getElementById("remember");
   const toggleBtn = document.getElementById("toggle-password");
-  const eyeIcon = toggleBtn.querySelector(".icon-eye");
-  const eyeOffIcon = toggleBtn.querySelector(".icon-eye-off");
   const capsBadge = document.getElementById("caps-badge");
   const errorBox = document.getElementById("auth-error");
   const errorText = document.getElementById("auth-error-text");
@@ -14,6 +18,26 @@
   const submitCheck = document.getElementById("submit-check");
   const submitLabel = document.getElementById("submit-label");
   const submitArrow = document.getElementById("submit-arrow");
+
+  const regForm = document.getElementById("register-form");
+  const regUsername = document.getElementById("reg-username");
+  const regDisplayName = document.getElementById("reg-display-name");
+  const regPassword = document.getElementById("reg-password");
+  const regPasswordConfirm = document.getElementById("reg-password-confirm");
+  const regNote = document.getElementById("reg-note");
+  const toggleRegBtn = document.getElementById("toggle-reg-password");
+  const regErrorBox = document.getElementById("reg-error");
+  const regErrorText = document.getElementById("reg-error-text");
+  const regSubmitBtn = document.getElementById("reg-submit-btn");
+  const regSubmitSpinner = document.getElementById("reg-submit-spinner");
+  const regSubmitLabel = document.getElementById("reg-submit-label");
+  const regSubmitArrow = document.getElementById("reg-submit-arrow");
+
+  const regSuccess = document.getElementById("register-success");
+  const regSuccessMessage = document.getElementById("reg-success-message");
+  const regSuccessUser = document.getElementById("reg-success-user");
+  const backToLoginBtn = document.getElementById("back-to-login");
+
   const stageStatus = document.getElementById("stage-status");
   const stageStatusLabel = document.getElementById("stage-status-label");
   const mobileStatusLabel = document.getElementById("mobile-status-label");
@@ -25,14 +49,69 @@
   const params = new URLSearchParams(window.location.search);
   const nextTarget = params.get("next") || "";
 
-  // Fetch execution mode badge without exposing private account metrics
+  function setMode(mode) {
+    const isReg = mode === "register";
+    tabLogin.classList.toggle("is-active", !isReg);
+    tabLogin.setAttribute("aria-selected", String(!isReg));
+    tabRegister.classList.toggle("is-active", isReg);
+    tabRegister.setAttribute("aria-selected", String(isReg));
+
+    authHeader.hidden = false;
+    regSuccess.hidden = true;
+    form.hidden = isReg;
+    regForm.hidden = !isReg;
+
+    if (isReg) {
+      authTitle.textContent = "申请注册账号";
+      authSubtitle.textContent = "提交后将通过微信推送给管理员审批，审核通过即可登录研究台。";
+      clearRegError();
+      regUsername.focus();
+    } else {
+      authTitle.textContent = "身份验证";
+      authSubtitle.textContent = "请输入账号凭证，进入现货研究与永续三币监控控制台。";
+      if (!countdownTimer) clearError();
+      usernameInput.focus();
+    }
+  }
+
+  tabLogin.addEventListener("click", () => setMode("login"));
+  tabRegister.addEventListener("click", () => setMode("register"));
+  backToLoginBtn.addEventListener("click", () => {
+    const registeredUser = regSuccessUser.textContent;
+    setMode("login");
+    if (registeredUser && registeredUser !== "—") {
+      usernameInput.value = registeredUser;
+      passwordInput.focus();
+    }
+  });
+
+  function wirePasswordToggle(button, input) {
+    if (!button || !input) return;
+    const eye = button.querySelector(".icon-eye");
+    const eyeOff = button.querySelector(".icon-eye-off");
+    button.addEventListener("click", () => {
+      const showing = input.type === "text";
+      input.type = showing ? "password" : "text";
+      button.setAttribute("aria-pressed", String(!showing));
+      button.setAttribute("aria-label", showing ? "显示密码" : "隐藏密码");
+      eye.hidden = !showing;
+      eyeOff.hidden = showing;
+      input.focus();
+    });
+  }
+
+  wirePasswordToggle(toggleBtn, passwordInput);
+  wirePasswordToggle(toggleRegBtn, regPassword);
+
   async function loadStatus() {
     try {
       const res = await fetch("/api/auth/status", { cache: "no-store" });
       if (!res.ok) return;
       const data = await res.json();
       if (data.authenticated && data.enabled) {
-        window.location.replace(nextTarget.startsWith("/") && !nextTarget.startsWith("//") ? nextTarget : "/account");
+        const fallback = data.can_view_account ? "/account" : "/";
+        const dest = nextTarget.startsWith("/") && !nextTarget.startsWith("//") ? nextTarget : fallback;
+        window.location.replace(dest);
         return;
       }
       const modeMap = {
@@ -70,6 +149,24 @@
     passwordInput.closest(".input-wrap").classList.remove("has-error");
   }
 
+  function showRegError(message, focusInput) {
+    regErrorText.textContent = message;
+    regErrorBox.hidden = false;
+    regForm.classList.remove("is-shaking");
+    void regForm.offsetWidth;
+    regForm.classList.add("is-shaking");
+    if (focusInput) {
+      focusInput.closest(".input-wrap").classList.add("has-error");
+      focusInput.focus();
+    }
+  }
+
+  function clearRegError() {
+    regErrorBox.hidden = true;
+    regErrorText.textContent = "";
+    regForm.querySelectorAll(".input-wrap.has-error").forEach((el) => el.classList.remove("has-error"));
+  }
+
   function setButtonState(state) {
     submitBtn.classList.remove("is-success");
     if (state === "loading") {
@@ -94,6 +191,13 @@
     }
   }
 
+  function setRegLoading(loading) {
+    regSubmitBtn.disabled = loading;
+    regSubmitSpinner.hidden = !loading;
+    regSubmitArrow.hidden = loading;
+    regSubmitLabel.textContent = loading ? "正在提交审核申请…" : "提交注册申请";
+  }
+
   function startRateCountdown(seconds) {
     let remaining = seconds;
     submitBtn.disabled = true;
@@ -116,18 +220,6 @@
     }, 1000);
   }
 
-  // Toggle password visibility
-  toggleBtn.addEventListener("click", () => {
-    const showing = passwordInput.type === "text";
-    passwordInput.type = showing ? "password" : "text";
-    toggleBtn.setAttribute("aria-pressed", String(!showing));
-    toggleBtn.setAttribute("aria-label", showing ? "显示密码" : "隐藏密码");
-    eyeIcon.hidden = !showing;
-    eyeOffIcon.hidden = showing;
-    passwordInput.focus();
-  });
-
-  // CapsLock detection on password field
   function updateCapsLock(event) {
     if (typeof event.getModifierState === "function") {
       capsBadge.hidden = !event.getModifierState("CapsLock");
@@ -145,6 +237,12 @@
     input.addEventListener("blur", () => { focusBoost = 0; });
   });
 
+  [regUsername, regDisplayName, regPassword, regPasswordConfirm, regNote].forEach((input) => {
+    input.addEventListener("input", clearRegError);
+    input.addEventListener("focus", () => { focusBoost = 1; });
+    input.addEventListener("blur", () => { focusBoost = 0; });
+  });
+
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (countdownTimer) return;
@@ -152,7 +250,7 @@
     const username = usernameInput.value.trim();
     const password = passwordInput.value;
     if (!username) {
-      showError("请输入管理员账号。");
+      showError("请输入登录账号。");
       usernameInput.focus();
       return;
     }
@@ -179,7 +277,7 @@
       const payload = await res.json().catch(() => ({}));
       if (res.ok && payload.ok) {
         setButtonState("success");
-        const destination = payload.redirect || "/account";
+        const destination = payload.redirect || (payload.can_view_account ? "/account" : "/");
         setTimeout(() => {
           window.location.replace(destination);
         }, 260);
@@ -195,10 +293,69 @@
       const msg = (payload.error && payload.error.message) || "登录失败，请稍后重试。";
       setButtonState("idle");
       showError(msg);
-      passwordInput.select();
+      if (res.status === 401) passwordInput.select();
     } catch {
       setButtonState("idle");
       showError("无法连接到服务器，请检查网络后重试。");
+    }
+  });
+
+  regForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    clearRegError();
+
+    const username = regUsername.value.trim();
+    const displayName = regDisplayName.value.trim();
+    const password = regPassword.value;
+    const confirm = regPasswordConfirm.value;
+    const note = regNote.value.trim();
+
+    if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(username)) {
+      showRegError("账号需为 3–32 位字母、数字、下划线、点或短横线。", regUsername);
+      return;
+    }
+    if (!displayName) {
+      showRegError("请填写姓名或称呼，方便管理员微信审批。", regDisplayName);
+      return;
+    }
+    if (password.length < 6) {
+      showRegError("密码长度至少需要 6 位。", regPassword);
+      return;
+    }
+    if (password !== confirm) {
+      showRegError("两次输入的密码不一致，请核对。", regPasswordConfirm);
+      return;
+    }
+
+    setRegLoading(true);
+    try {
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username,
+          display_name: displayName,
+          password,
+          note,
+        }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (res.ok && payload.ok) {
+        regForm.reset();
+        regForm.hidden = true;
+        authHeader.hidden = true;
+        regSuccessMessage.textContent = payload.message || "请耐心等待管理员审核，审核通过后可正常登录";
+        regSuccessUser.textContent = payload.username || username.toLowerCase();
+        regSuccess.hidden = false;
+        setRegLoading(false);
+        return;
+      }
+      const msg = (payload.error && payload.error.message) || "注册提交失败，请稍后重试。";
+      setRegLoading(false);
+      showRegError(msg);
+    } catch {
+      setRegLoading(false);
+      showRegError("无法连接到服务器，请检查网络后重试。");
     }
   });
 
@@ -213,15 +370,14 @@
     let width = 0;
     let height = 0;
     let pointerX = null;
-    let pointerY = null;
     let phase = 0;
     let currentBoost = 0;
     let rafId = null;
 
     const curves = [
-      { color: "rgba(214, 152, 92, 0.92)", glow: "rgba(214, 152, 92, 0.14)", width: 1.75, amp: 0.24, freq: 1.55, speed: 0.0055, offset: 0.0, fill: true },
-      { color: "rgba(96, 184, 154, 0.86)", glow: "rgba(96, 184, 154, 0.09)", width: 1.45, amp: 0.17, freq: 2.15, speed: 0.0042, offset: 1.9, fill: false },
-      { color: "rgba(205, 198, 190, 0.45)", glow: "rgba(205, 198, 190, 0.05)", width: 1.15, amp: 0.12, freq: 1.15, speed: 0.0031, offset: 3.4, fill: false },
+      { color: "rgba(214, 152, 92, 0.92)", width: 1.75, amp: 0.24, freq: 1.55, offset: 0.0, fill: true },
+      { color: "rgba(96, 184, 154, 0.86)", width: 1.45, amp: 0.17, freq: 2.15, offset: 1.9, fill: false },
+      { color: "rgba(205, 198, 190, 0.45)", width: 1.15, amp: 0.12, freq: 1.15, offset: 3.4, fill: false },
     ];
 
     function resize() {
@@ -255,7 +411,6 @@
       const plotH = Math.max(10, height - padTop - padBottom);
       const midY = padTop + plotH * 0.52;
 
-      // Calibrated horizontal regime reference lines
       ctx.strokeStyle = "rgba(235, 228, 218, 0.075)";
       ctx.lineWidth = 1;
       for (let i = 0; i <= 3; i += 1) {
@@ -266,7 +421,6 @@
         ctx.stroke();
       }
 
-      // Dashed Donchian breakout envelope around primary BTC curve
       const samples = 96;
       ctx.save();
       ctx.setLineDash([3, 5]);
@@ -285,7 +439,6 @@
       }
       ctx.restore();
 
-      // Render 3 independent engine contours
       curves.forEach((curve, idx) => {
         const pts = [];
         for (let i = 0; i <= samples; i += 1) {
@@ -317,7 +470,6 @@
         ctx.lineWidth = curve.width + currentBoost * 0.25;
         ctx.stroke();
 
-        // Crisp terminal endpoint beacon
         const [lx, ly] = pts[pts.length - 1];
         ctx.beginPath();
         ctx.arc(lx, ly, 3.2, 0, Math.PI * 2);
@@ -325,7 +477,6 @@
         ctx.fill();
       });
 
-      // Interactive pointer crosshair readout
       if (pointerX !== null && pointerX >= padLeft && pointerX <= padLeft + plotW) {
         const u = (pointerX - padLeft) / plotW;
         ctx.strokeStyle = "rgba(235, 228, 218, 0.18)";
@@ -359,13 +510,11 @@
     canvas.addEventListener("pointermove", (e) => {
       const rect = canvas.getBoundingClientRect();
       pointerX = e.clientX - rect.left;
-      pointerY = e.clientY - rect.top;
       if (reducedMotion) draw();
     });
 
     canvas.addEventListener("pointerleave", () => {
       pointerX = null;
-      pointerY = null;
       if (coordLabel) coordLabel.textContent = "CLOSED-BAR ENGINE · D3";
       if (reducedMotion) draw();
     });

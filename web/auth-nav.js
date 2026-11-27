@@ -1,11 +1,25 @@
 (() => {
+  const isMemberCookie = /(?:^|;\s*)tb_role=member(?:;|$)/.test(document.cookie);
+  if (isMemberCookie) {
+    document.documentElement.classList.add("role-member");
+  }
+
   const nav = document.querySelector(".workspace-nav");
   if (!nav) return;
 
   fetch("/api/auth/status", { cache: "no-store" })
     .then((res) => (res.ok ? res.json() : null))
     .then((data) => {
-      if (!data || !data.enabled || !data.authenticated) return;
+      if (!data) return;
+      const accountLink = nav.querySelector('a[href="/account"]');
+      if (data.can_view_account === false) {
+        document.documentElement.classList.add("role-member");
+        if (accountLink) accountLink.remove();
+      } else {
+        document.documentElement.classList.remove("role-member");
+      }
+
+      if (!data.enabled || !data.authenticated) return;
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "nav-logout";

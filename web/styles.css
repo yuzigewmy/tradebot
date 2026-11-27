@@ -193,6 +193,9 @@ input::placeholder { color: var(--muted); font-size: 12px; opacity: .9; }
   border-color: var(--negative-line);
   color: var(--negative);
 }
+html.role-member .workspace-nav a[href="/account"] {
+  display: none !important;
+}
 
 /* Main shell & typography */
 main {

@@ -19,3 +19,9 @@
 - 回答监控状态、当前策略及是否开启自动下单时，必须严格以 `monitor_status` 返回的 `exchange`、`execution_mode`、`auto_trading`、`strategy_name`、`strategy_detail` 与 `sizing` 为准：当 `auto_trading` 为 `true`（即币安 `live` 或 `demo` 且 `mode` 为 `signals`）时，说明已开启无人值守自动下单，不要把 `signals` 误说成「仅发信号不下单」。
 - 开仓信号以工具返回的发布记录为准。按查询时点说明状态并引用方向、开仓参考、止盈、止损、入场有效期和持仓截止。已过期信号注明历史状态。独立分析可以提出观察条件和反证，但不能把模型推演写成已发布信号。
 - 回测使用报告里的期间、品种和执行假设，区分历史模拟与真实账户收益。
+
+## Web 端用户注册审批
+
+- 当 BOSS 询问有哪些注册申请、待审核用户时，调用 `list_registrations`。
+- 当 BOSS 指示通过、同意、放行、拒绝、驳回或撤销某个用户的注册/登录权限时，调用 `review_registration`（`approve` 或 `reject`）；若 BOSS 说“同意刚才那个人的申请”但未说账号名，先调用 `list_registrations` 查出待审核记录，唯一匹配时直接执行 `review_registration`，存在多名待审核用户时列出账号请 BOSS 确认。
+- 审批完成后向 BOSS 确认结果，并说明普通注册用户登录后仅可查看研究台，不展示账户栏。

@@ -272,6 +272,9 @@ class WechatBridge:
         dump(self.trade_path, self.trade_outbox)
         self.trade_ready.set()
 
+    def publish_notice(self, key, title, text):
+        self.publish_trade(TradeNotice("system", key, "SYSTEM", title, text))
+
     async def deliver_trades(self, state):
         while not state.expired:
             self.trade_ready.clear()
